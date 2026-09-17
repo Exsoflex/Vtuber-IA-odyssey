@@ -1,0 +1,8 @@
+google-genai
+python-dotenv
+Pillow
+SpeechRecognition
+PyAudio
+pygame
+edge-tts
+websockets
