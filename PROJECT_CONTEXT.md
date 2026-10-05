@@ -1,129 +1,203 @@
 # 📄 CONTEXTO DEL PROYECTO: NIU AUTONOMOUS ENGINE
 
-## 🎯 Visión General
+## 🎯 Visión general
 
 **Proyecto:** Niu Autonomous Engine — Motor Cognitivo y Multimodal para VTuber IA  
 **Objetivo:** Crear una VTuber autónoma ("Niu") con:
-- Razonamiento y memoria persistente (Gemini)
-- Voz expresiva estilo anime (Edge-TTS)
-- Sincronización labial en tiempo real (VTube Studio + WebSocket)
-- Expresiones emocionales dinámicas
-- Entrada por voz (STT) y texto
 
-**Stack:** Python 3.11+ | `google-genai` | `edge-tts` | `websockets` | `winsound` | `SpeechRecognition`
+- Razonamiento y memoria persistente.
+- Voz expresiva estilo anime.
+- Sincronización labial en tiempo real.
+- Expresiones emocionales dinámicas.
+- Entrada por voz y texto.
+- Arquitectura preparada para cambiar de proveedor de LLM sin reescribir el sistema completo.
+
+**Stack base actual:** Python 3.11+ | `google-genai` | `edge-tts` | `websockets` | `winsound` | `SpeechRecognition`
+
+> Nota arquitectónica: Gemini es el proveedor LLM actualmente integrado, pero ya no debe considerarse una dependencia permanente. La siguiente evolución del proyecto es desacoplar el cerebro del proveedor y permitir un backend local como Ollama.
 
 ---
 
-## 🏗️ Arquitectura Actual (Fase 2 Completada)
+## 🏗️ Arquitectura actual
 
-```
+```text
 Vtuber IA odyssey/
 ├── core/
 │   ├── __init__.py
-│   ├── brain.py          # Cerebro: Gemini + Memoria + System Instruction
-│   ├── tts.py            # Voz: Edge-TTS (DaliaNeural + pitch/rate) → WAV
-│   └── vts_client.py     # VTube Studio: WebSocket + Auth + Parámetros + Expresiones
-├── main.py               # Orquestador: Lip-sync (RMS) + Expresiones + CLI
+│   ├── brain.py          # Cerebro actual: Gemini + memoria + personalidad
+│   ├── tts.py            # Voz: Edge-TTS → WAV
+│   └── vts_client.py     # VTube Studio: WebSocket + auth + parámetros + expresiones
+├── main.py               # Orquestador: entrada + LLM + TTS + VTS + CLI
 ├── requirements.txt
 ├── .env                  # GOOGLE_API_KEY (no versionado)
 ├── vts_token.txt         # Token VTS persistente (no versionado)
-└── dia_por_dia/          # Historial de aprendizaje (Días 0-19)
+└── dia_por_dia/          # Historial de aprendizaje
 ```
 
-### Flujo de Datos Principal
+### Flujo funcional actual
 
-```mermaid
-graph TD
-    A[Usuario: Voz/Texto] --> B[main.py]
-    B --> C[core/brain.py: Gemini 3.5-flash]
-    C --> D[Respuesta de Niu + Historial]
-    D --> E[core/tts.py: Edge-TTS → WAV]
-    E --> F[winsound: Reproducción]
-    E --> G[core/vts_client.py: WebSocket]
-    G --> H[VTube Studio: MouthOpen + Expresiones]
+```text
+Usuario: voz/texto
+        ↓
+main.py
+        ↓
+core/brain.py
+        ↓
+Gemini + memoria + personalidad
+        ↓
+respuesta
+        ├──────────────→ core/tts.py → WAV → winsound
+        │
+        └──────────────→ core/vts_client.py → WebSocket → VTube Studio
 ```
+
+### Estado funcional documentado
+
+- ✅ Cerebro con Gemini y memoria manual.
+- ✅ Voz con Edge-TTS.
+- ✅ Conexión persistente con VTube Studio.
+- ✅ Lip-sync mediante RMS → `MouthOpen`.
+- ✅ Expresiones mediante keywords → hotkeys.
+- ✅ CLI con entrada de voz/texto.
+- ⚠️ El cerebro está acoplado al SDK/proveedor Gemini y debe desacoplarse.
+- ⚠️ El proveedor actual presenta límites/cuotas que impiden usarlo de manera confiable para pruebas continuas.
 
 ---
 
-## 📜 Historial de Decisiones (ADR)
+## 🔌 Próximo cambio arquitectónico: proveedor LLM
+
+Objetivo:
+
+```text
+                    Niu
+                     │
+               LLMProvider
+                 /       \
+             Gemini      Ollama
+                 \       /
+                  Modelo
+```
+
+La interfaz común debe encapsular únicamente aquello que la aplicación necesita del proveedor, evitando propagar tipos específicos del SDK de Gemini por todo el sistema.
+
+La primera implementación debe conservar el comportamiento actual tanto como sea posible. Después se añadirá el backend local y se compararán:
+
+- latencia;
+- calidad de respuesta;
+- uso de contexto/memoria;
+- estabilidad;
+- consumo de recursos;
+- facilidad de desarrollo.
+
+---
+
+## 📜 Decisiones existentes
 
 | Fecha | Decisión | Razón |
 |-------|----------|-------|
-| Día 0-5 | Python 3.11 en `.venv` | Compatibilidad `PyAudio`/`SpeechRecognition` |
-| Día 6-7 | SDK `google-genai` (no legacy) | Tipado estricto, modelos actuales |
-| Día 11-12 | Memoria manual `List[Content]` + Sliding Window | Control total, evita bugs de `ChatSession` |
-| Día 13-14 | `io.BytesIO` para imágenes | Serialización binaria canónica |
-| Día 16 | Separación Cerebro/Voz | Modelos TTS rechazan `system_instruction` |
-| Día 17-18 | Edge-TTS (DaliaNeural) + pitch/rate | Voz anime expresiva, sin cuota Gemini TTS |
-| Día 19 | WebSocket persistente + token local | Evita re-autenticación manual |
-| Día 20 | Lip-sync RMS → `MouthOpen` | Tiempo real sin librerías pesadas |
+| Día 0-5 | Python 3.11 en `.venv` | Compatibilidad con `PyAudio`/`SpeechRecognition` |
+| Día 6-7 | SDK `google-genai` | SDK moderno y tipado |
+| Día 11-12 | Memoria manual `List[Content]` + Sliding Window | Control del historial |
+| Día 13-14 | `io.BytesIO` para imágenes | Manejo binario de imágenes |
+| Día 16 | Separación Cerebro/Voz | Evitar mezclar responsabilidades |
+| Día 17-18 | Edge-TTS + ajustes de voz | Voz expresiva sin depender del TTS de Gemini |
+| Día 19 | WebSocket persistente + token local | Evitar reautenticación manual |
+| Día 20 | Lip-sync RMS → `MouthOpen` | Solución en tiempo real sin librerías pesadas |
+
+### Nueva decisión arquitectónica propuesta
+
+| Estado | Decisión | Razón |
+|--------|----------|-------|
+| Pendiente | Desacoplar proveedor LLM | Permitir Gemini, Ollama y futuros proveedores sin reescribir el cerebro |
 
 ---
 
-## 🔑 Configuración Requerida
+## 🔑 Configuración sensible
 
-### `.env` (crear en raíz)
-```bash
-GOOGLE_API_KEY=tu_api_key_de_google_ai_studio
-```
+Nunca versionar:
 
-### VTube Studio
-1. Abrir VTube Studio
-2. Configuración → API → Activar servidor WebSocket (puerto 8001)
-3. Primera ejecución: aceptar ventana de permisos "NiuAutonomousEngine"
+- API keys.
+- Tokens de VTube Studio.
+- Credenciales.
+- Archivos `.env` reales.
 
----
+Ejemplo documentado:
 
-## 🧪 Estado de la API (Importante)
-
-**Problema actual:** Cuota gratuita Gemini agotada / Modelos flash saturados (503/429)
-- `gemini-3.5-flash`: 503 UNAVAILABLE (alta demanda)
-- `gemini-3.1-pro`: 429 QUOTA_EXCEEDED
-- **Workaround:** Esperar reset de cuota (diario) o usar plan de pago
-
-**Modelos probados y funcionales cuando hay cuota:**
-- `gemini-3.5-flash` (rápido, cuota flash)
-- `gemini-flash-latest` (alias estable)
-- `gemini-3.1-flash` (si disponible en v1beta)
-
----
-
-## 🚀 Cómo Ejecutar
-
-```powershell
-# Activar entorno
-& ".\.venv\Scripts\python" "main.py"
-
-# Opciones:
-# 1 - Hablar por micrófono (STT Google)
-# 2 - Escribir por texto
-# 4 - Salir
+```env
+GOOGLE_API_KEY=tu_api_key
 ```
 
 ---
 
-## 📦 Dependencias (requirements.txt)
+## 🧪 Problema actual
 
-```
-google-genai
-python-dotenv
-Pillow
-SpeechRecognition
-PyAudio
-edge-tts
-websockets
-```
+El sistema actual depende de Gemini y las pruebas han encontrado respuestas de saturación/cuota. El proyecto necesita una alternativa que permita experimentar continuamente sin depender de la disponibilidad de una API gratuita.
 
-*Nota: `winsound` y `wave` son stdlib de Windows. `PyAudio` requiere Python 3.11.*
+**Objetivo inmediato:** evaluar e integrar un backend local mediante Ollama sin perder el trabajo ya realizado con Gemini, TTS y VTube Studio.
 
 ---
 
-## 🎓 Próximos Pasos Sugeridos (para cuando retomes)
+## 🎓 Estado de aprendizaje
 
-1. **Migración a `pydantic-settings`** para config tipada
-2. **Logging estructurado** (`loguru` o `structlog`)
-3. **Tests unitarios** para `brain.py` (memoria, poda) y `vts_client.py`
-4. **Interrupciones de voz** (barge-in): cancelar TTS si usuario habla
-5. **Modelo Live2D propio** (dibujar en capas → Live2D Cubism → VTube Studio)
-6. **Streaming de audio** (evitar archivo temporal WAV)
-7. **Métricas/Observabilidad** (latencia, tokens, errores)
+Esta sección existe para que el tutor no enseñe desde cero conceptos que el estudiante ya ha practicado.
+
+### Ya practicado / con experiencia
+
+- Python básico y creación de programas pequeños.
+- Uso de terminal y entornos virtuales.
+- Consumo de una API de IA.
+- Texto, voz e imágenes como entradas para un programa de IA.
+- Estructuración inicial de un proyecto en módulos.
+- Uso de `google-genai`.
+- Integración básica con Edge-TTS.
+- Comunicación con VTube Studio.
+- Uso de Git a nivel práctico.
+
+### En práctica
+
+- Asyncio y programación asíncrona.
+- WebSockets.
+- Arquitectura de aplicaciones más grandes.
+- Manejo de errores y depuración.
+- Diseño de interfaces entre componentes.
+- Memoria y contexto para LLMs.
+- Integración entre varios servicios.
+
+### Prioridad de aprendizaje actual
+
+1. Comprender la arquitectura existente antes de modificarla.
+2. Aprender a separar la lógica de Niu del proveedor LLM.
+3. Entender HTTP/JSON y la comunicación con Ollama.
+4. Implementar y probar un backend local.
+5. Mejorar progresivamente autonomía para depurar y modificar el sistema.
+
+### Aún no asumir dominio completo de
+
+- Diseño de sistemas complejos.
+- Concurrencia avanzada.
+- Patrones de arquitectura para aplicaciones orientadas a eventos.
+- Sistemas de memoria/RAG avanzados.
+- Tool calling y agentes autónomos.
+- Optimización avanzada de inferencia local.
+
+---
+
+## 🚧 Deuda técnica conocida
+
+- `brain.py` está fuertemente ligado a Gemini.
+- Falta una interfaz común para proveedores LLM.
+- Configuración pendiente de migrar a settings tipados.
+- Logging profesional pendiente.
+- Tests unitarios pendientes.
+- Interrupción de TTS pendiente.
+- Streaming de audio pendiente.
+
+---
+
+## 📌 Regla para el tutor
+
+Antes de proponer una funcionalidad nueva, comprobar en el código si ya existe.
+
+No enseñar como nuevo algo que esté implementado y dominado.
+
+No asumir que una funcionalidad documentada como "completa" está necesariamente comprendida por el estudiante: distinguir entre **funcionalidad existente** y **conocimiento dominado**.
