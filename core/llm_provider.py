@@ -5,13 +5,11 @@ from dataclasses import dataclass
 class LLMConfig:
     temperature: float = 0.9
     max_tokens: int | None = None
-    # ? Aqui no deberia ir el system instruction?
 
 @dataclass
 class LLMResponse:
     text: str
     # Futuro: tokens_used, finish_reason, model, latency_ms
-    # ? no entiendo las implementaciones futuras, si quiero que en un stream aparezcan los subtitulos de lo que dice la IA, no es necesario agregar eso aqui verdad? eso es aparte?
     
 # Tipo simple para mensajes (empieza simple, migra luego)
 # Dict[str, Any] = {"role": "user", "content": "hola"}

@@ -1,5 +1,6 @@
 import httpx
-from typing import List, Dict, Any
+import json
+from typing import AsyncIterator, List, Dict, Any
 from core.llm_provider import LLMProvider, Messages, LLMConfig, LLMResponse
 
 
@@ -73,7 +74,7 @@ class OllamaAdapter:
         messages: Messages,
         system_intruction: str | None,
         config: LLMConfig,
-    ):
+    ) -> AsyncIterator[str]:
         """
         Genera respuesta en streaming (trozo a trozo) para subtitulos en vivo
         Devuelve AsyncIterator[str] - cada yield es un trozo de texto.
@@ -103,13 +104,16 @@ class OllamaAdapter:
         self,
         messages: Messages,
         system_instruction: str | None,
-        config: LLMConfig,
-    ) -> dict: 
+        config: LLMConfig | None,
+    ) -> dict:
+        
+        # Default robusto
+        if config is None:
+            config = LLMConfig()
         """
         Convierte el formato comun (Messages + system_instruction + config)
         al formato que espera la API de Ollama (/api/chat).
         """
-        
         ollama_messages = []
         
         # 1a. Si hay system_instruction, anadirlo como primer mensaje cone role="System"
@@ -126,7 +130,7 @@ class OllamaAdapter:
         # 2. Construir el payload completo
         payload = {
             "model": self.model,
-            "message": ollama_messages,
+            "messages": ollama_messages,
             "stream": False,
             "options": {
                 "temperature": config.temperature,
