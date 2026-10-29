@@ -12,9 +12,11 @@
 - Entrada por voz y texto.
 - Arquitectura preparada para cambiar de proveedor de LLM sin reescribir el sistema completo.
 
-**Stack base actual:** Python 3.11+ | `google-genai` | `edge-tts` | `websockets` | `winsound` | `SpeechRecognition`
+**Stack base actual:** Python 3.14 | `ollama` (local) | `faster-whisper` (STT local) | `edge-tts` | `websockets` | `sounddevice`
 
-> Nota arquitectónica: Gemini es el proveedor LLM actualmente integrado, pero ya no debe considerarse una dependencia permanente. La siguiente evolución del proyecto es desacoplar el cerebro del proveedor y permitir un backend local como Ollama.
+> Nota arquitectónica: Gemini sigue siendo un proveedor posible, pero el cerebro ya no depende de su SDK. La generación de texto pasa por la interfaz `LLMProvider`.
+>
+> Lo mismo ocurre ahora con el oído: la transcripción pasa por `STTProvider`, con dos adaptadores intercambiables (`faster-whisper` local y Gemini en la nube).
 
 ---
 
@@ -24,43 +26,60 @@
 Vtuber IA odyssey/
 ├── core/
 │   ├── __init__.py
-│   ├── brain.py          # Cerebro actual: Gemini + memoria + personalidad
-│   ├── tts.py            # Voz: Edge-TTS → WAV
-│   └── vts_client.py     # VTube Studio: WebSocket + auth + parámetros + expresiones
-├── main.py               # Orquestador: entrada + LLM + TTS + VTS + CLI
+│   ├── brain.py           # Memoria + personalidad + llamada a LLMProvider
+│   ├── llm_provider.py    # Interfaz común (Protocol) + LLMConfig/LLMResponse
+│   ├── ollama_adapter.py  # Implementación local vía /api/chat
+│   ├── stt.py             # Micrófono (sounddevice) + detección de silencio (VAD)
+│   ├── stt_provider.py    # Interfaz común (Protocol) + utilidades de audio
+│   ├── stt_whisper.py      # Adaptador local: faster-whisper (GPU/CPU)
+│   ├── stt_gemini.py       # Adaptador nube: Gemini (audio → texto)
+│   ├── tts.py             # Voz: Edge-TTS → MP3 → dispositivo virtual
+│   ├── audio_devices.py   # Búsqueda de dispositivos por nombre y host API
+│   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
+├── main.py                # Orquestador: entrada + LLM + TTS + VTS + CLI
+├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
 ├── requirements.txt
-├── .env                  # GOOGLE_API_KEY (no versionado)
-├── vts_token.txt         # Token VTS persistente (no versionado)
-└── dia_por_dia/          # Historial de aprendizaje
+├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
+├── vts_token.txt          # Token VTS persistente (no versionado)
+├── test_audio.py          # Script auxiliar para listar salidas de audio
+└── dia_por_dia/           # Historial de aprendizaje
 ```
 
 ### Flujo funcional actual
 
 ```text
-Usuario: voz/texto
+Usuario: voz (micrófono DGM20) o teclado
         ↓
-main.py
+core/stt.py → PCM 16 kHz (2 canales nativos → mono) → VAD por RMS
+        ↓
+STTProvider (NIU_STT=whisper | gemini) → texto
         ↓
 core/brain.py
         ↓
-Gemini + memoria + personalidad
+LLMProvider (por defecto OllamaAdapter → /api/chat)
         ↓
 respuesta
-        ├──────────────→ core/tts.py → WAV → winsound
-        │
-        └──────────────→ core/vts_client.py → WebSocket → VTube Studio
+        └──────────────→ core/tts.py → MP3 → Voicemeeter In 1
+                                              ↓
+                                    VTube Studio (lip sync + audio)
 ```
 
 ### Estado funcional documentado
 
-- ✅ Cerebro con Gemini y memoria manual.
-- ✅ Voz con Edge-TTS.
+- ✅ Cerebro desacoplado del proveedor mediante `LLMProvider`.
+- ✅ Backend local con Ollama (`qwen2.5:7b-instruct-q4_k_m` por defecto).
+- ✅ Memoria manual con ventana deslizante.
+- ✅ Voz con Edge-TTS reproducida en `Voicemeeter In 1`.
 - ✅ Conexión persistente con VTube Studio.
-- ✅ Lip-sync mediante RMS → `MouthOpen`.
-- ✅ Expresiones mediante keywords → hotkeys.
-- ✅ CLI con entrada de voz/texto.
-- ⚠️ El cerebro está acoplado al SDK/proveedor Gemini y debe desacoplarse.
-- ⚠️ El proveedor actual presenta límites/cuotas que impiden usarlo de manera confiable para pruebas continuas.
+- ✅ Entrada de voz con `sounddevice` (sin PyAudio) y detección de silencio por RMS.
+- ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
+- ✅ Whisper `large-v3` en GPU (RTX 4050): 0,9–1,6 s por frase. Fallback a CPU int8.
+- ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
+- ✅ Fallback a teclado cuando no hay micrófono.
+- ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
+- ⚠️ El soporte de imágenes quedó desactivado: el modelo local no es multimodal.
+- ⚠️ Gemini ya no está conectado; falta un `GeminiAdapter` si se quiere volver a usar.
+- ⚠️ El logging sigue siendo `print`.
 
 ---
 
@@ -108,7 +127,16 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 
 | Estado | Decisión | Razón |
 |--------|----------|-------|
-| Pendiente | Desacoplar proveedor LLM | Permitir Gemini, Ollama y futuros proveedores sin reescribir el cerebro |
+| Hecho | Desacoplar proveedor LLM (`LLMProvider`) | Permitir Gemini, Ollama y futuros proveedores sin reescribir el cerebro |
+| Hecho | Ollama como backend por defecto | Sin cuotas, latencia local y control del modelo |
+| Hecho | Entrada de audio con `sounddevice` | PyAudio no tiene wheel para Python 3.14 |
+| Hecho | Salida TTS en `Voicemeeter In 1` | Ruteo de audio propio para que VTS haga lip sync |
+| Hecho | Salida por DirectSound (no WASAPI) | WASAPI falla al abrir el stream desde un hilo secundario |
+| Hecho | `STTProvider` con `whisper` y `gemini` | Mismo patrón que `LLMProvider`: cambiar de motor sin tocar captura ni `main.py` |
+| Hecho | Whisper local como motor por defecto | Sin cuotas, sin internet y sin enviar la voz a terceros |
+| Hecho | Capturar con los canales nativos del micro y elegir canal en Python | Pedir `channels=1` a un dispositivo estéreo corrompe el audio en WASAPI |
+| Hecho | `initial_prompt` con el nombre «Niu» | Sin contexto, el decoder lo sustituía por «New»/«Neil» |
+| Pendiente | `GeminiAdapter` | Poder alternar entre local y nube |
 
 ---
 
@@ -131,9 +159,29 @@ GOOGLE_API_KEY=tu_api_key
 
 ## 🧪 Problema actual
 
-El sistema actual depende de Gemini y las pruebas han encontrado respuestas de saturación/cuota. El proyecto necesita una alternativa que permita experimentar continuamente sin depender de la disponibilidad de una API gratuita.
+El backend local ya está integrado y responde, y el oído funciona de extremo a extremo. Los puntos débiles conocidos ahora son:
 
-**Objetivo inmediato:** evaluar e integrar un backend local mediante Ollama sin perder el trabajo ya realizado con Gemini, TTS y VTube Studio.
+- Las expresiones emocionales dependen de hotkeys con nombres concretos.
+- El TTS bloquea el bucle mientras habla (no hay barge-in).
+- No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
+- No hay tests automatizados del cerebro ni del adaptador.
+
+**Objetivo inmediato:** probar la conversación completa (`main.py`), medir la latencia total (voz → respuesta → voz) y después añadir tests y logging.
+
+### Caso resuelto: «el micrófono no entendía»
+
+Síntoma: el micrófono capturaba, el nivel era correcto (−30 dBFS), pero todos los motores fallaban (Google devolvía vacío, Whisper alucinaba «¡Suscríbete!», Gemini inventaba otros idiomas).
+
+Causa real: `core/stt.py` abría el dispositivo con `channels=1`. El DGM20 entrega **2 canales** (mono duplicado), y la conversión 2→1 de WASAPI en PortAudio corrompía el audio. Medido con el mismo micrófono y la misma frase:
+
+| captura | f0 medido | centroide de agudos | Whisper |
+|---|---|---|---|
+| 1 canal | 369 Hz (error de octava) | 1 103 Hz | no transcribe |
+| 2 canales | 159 Hz (correcto) | 1 635 Hz | «Hola Niu, uno, dos, tres» |
+
+Por qué costó tanto: el daño era **invisible** en las métricas obvias. El nivel era normal, la duración era correcta y el habla seguía pareciendo habla. Las hipótesis acústicas (ruido, reverberación, retumbe, velocidad de reloj, tamaño del modelo, procesado de Windows) eran plausibles y hubo que descartarlas una por una con mediciones, no por intuición.
+
+Lección para el proyecto: cuando un síntoma afecta a **todos** los motores a la vez, el fallo suele estar en la capa común (captura), no en los motores.
 
 ---
 
@@ -162,14 +210,24 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Diseño de interfaces entre componentes.
 - Memoria y contexto para LLMs.
 - Integración entre varios servicios.
+- Depuración de audio digital (frecuencia de muestreo, canales, espectro, niveles en dBFS).
+- Comprobar hipótesis con experimentos controlados en vez de cambiar cosas a ciegas.
 
 ### Prioridad de aprendizaje actual
 
 1. Comprender la arquitectura existente antes de modificarla.
-2. Aprender a separar la lógica de Niu del proveedor LLM.
-3. Entender HTTP/JSON y la comunicación con Ollama.
-4. Implementar y probar un backend local.
-5. Mejorar progresivamente autonomía para depurar y modificar el sistema.
+2. Entender el flujo completo de punta a punta: voz → STT → cerebro → TTS → VTS.
+3. Saber medir latencia y localizar dónde se va el tiempo.
+4. Escribir tests para la lógica crítica (VAD, remuestreo, cerebro).
+5. Ganar autonomía depurando audio y concurrencia sin depender del tutor.
+
+### Conceptos aprendidos dentro del proyecto
+
+- **Abstracción con `Protocol`**: `LLMProvider` y `STTProvider` definen el contrato; los adaptadores (`ollama_adapter`, `stt_whisper`, `stt_gemini`) lo cumplen. El resto del sistema no conoce al proveedor concreto.
+- **Remuestreo con antialiasing**: interpolar linealmente sin filtrar pliega las frecuencias altas dentro de la banda audible. La versión correcta recorta el espectro antes de cambiar de tasa.
+- **Depuración por medición controlada**: cambiar una sola variable (canales, frecuencia, modelo) y comparar números objetivos (f0, centroide espectral, dBFS, transcripción). Formular una hipótesis y refutarla con datos, en vez de acumular cambios.
+- **Niveles en dBFS**: medir en absoluto (contra el fondo de escala) y no solo normalizando por archivo, porque normalizar oculta si lo que hay es señal o ruido amplificado.
+- **Contexto del decoder (`initial_prompt`)**: Whisper elige palabras por contexto; sin él, un nombre propio como «Niu» se convierte en «New».
 
 ### Aún no asumir dominio completo de
 
@@ -184,13 +242,15 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 
 ## 🚧 Deuda técnica conocida
 
-- `brain.py` está fuertemente ligado a Gemini.
-- Falta una interfaz común para proveedores LLM.
+- Falta `GeminiAdapter` para volver a usar la nube.
 - Configuración pendiente de migrar a settings tipados.
 - Logging profesional pendiente.
 - Tests unitarios pendientes.
 - Interrupción de TTS pendiente.
 - Streaming de audio pendiente.
+- Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
+- Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
+- El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
 
 ---
 

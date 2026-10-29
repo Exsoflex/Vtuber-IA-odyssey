@@ -1,153 +1,152 @@
-import sys
-import io
-import os
+"""
+Motor principal de Niu Autonomous Engine.
+Orquesta cerebro (LLM), voz (TTS) y VTube Studio.
+Entrada continua por voz o teclado.
+"""
+
 import asyncio
-import wave
-import struct
-import winsound
-import speech_recognition as sr
-from core.brain import procesar_mensaje_niu
+import os
+import sys
+import time
+
+import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from core.audio_devices import buscar_dispositivo
+from core.brain import NiuBrain
+from core.stt import (
+    FRASES_SALIDA,
+    SAMPLE_RATE,
+    crear_proveedor_stt,
+    grabar_hasta_silencio,
+)
 from core.tts import sintetizar_y_reproducir_voz_async
 from core.vts_client import vts_client
 
-# Forzar codificación UTF-8 en la consola de Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# ─── UTF-8 y salida sin buffering en consola Windows ───────────────────────
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-def escuchar_microfono():
-    """Captura voz desde el micrófono local y la convierte a texto (STT es-MX)."""
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("\n--- [SISTEMA AUDITIVO]: Niu te esta escuchando... ---")
-        r.adjust_for_ambient_noise(source, duration=1)
-        audio = r.listen(source)
-        try:
-            texto = r.recognize_google(audio, language="es-MX")
-            return texto
-        except sr.UnknownValueError:
-            return "ERROR_AUDIO_NO_COMPRENDIDO"
-        except sr.RequestError:
-            return "ERROR_SERVICIO_VOZ"
+# Micrófono físico de Héctor. Importante: NO usar "Voicemeeter Out B1", porque
+# ese bus lleva la voz de Niu y el audio del sistema (Niu se oiría a sí misma).
+# Si prefieres pasar tu voz por Voicemeeter, enruta HARDWARE IN 1 a B2 y pon
+# NIU_MIC="Voicemeeter Out B2" en el .env.
+DISPOSITIVO_ENTRADA = os.getenv("NIU_MIC", "DGM20 USB Microphone")
 
-def analizar_amplitud_audio(ruta_wav: str, chunk_size: int = 1024):
-    """
-    Analiza un archivo WAV y genera una lista de valores de amplitud normalizada (0.0 - 1.0)
-    para sincronización labial (lip-sync).
-    """
-    try:
-        with wave.open(ruta_wav, 'rb') as wav_file:
-            frames = wav_file.readframes(wav_file.getnframes())
-            sample_width = wav_file.getsampwidth()
-            n_channels = wav_file.getnchannels()
-            
-            fmt = f"<{len(frames) // sample_width}h" if sample_width == 2 else f"<{len(frames)}b"
-            samples = struct.unpack(fmt, frames)
-            
-            if n_channels == 2:
-                samples = [(samples[i] + samples[i+1]) / 2 for i in range(0, len(samples), 2)]
-            
-            amplitudes = []
-            for i in range(0, len(samples), chunk_size):
-                chunk = samples[i:i+chunk_size]
-                if chunk:
-                    rms = (sum(x*x for x in chunk) / len(chunk)) ** 0.5
-                    normalized = min(rms / 32767.0, 1.0)
-                    amplitudes.append(normalized)
-            
-            return amplitudes
-    except Exception as e:
-        print(f"[WARN] [LipSync] Error analizando audio: {e}")
-        return []
+# "" o "auto" = que el motor detecte el idioma (sirve para español e inglés).
+IDIOMA_STT = os.getenv("NIU_STT_IDIOMA", "").strip().lower() or None
 
-async def sincronizar_labios(ruta_wav: str):
-    """
-    Reproduce el audio y envía valores de amplitud a VTube Studio para MouthOpen en tiempo real.
-    """
-    if not vts_client.connected:
-        return
-        
-    amplitudes = analizar_amplitud_audio(ruta_wav)
-    if not amplitudes:
-        return
-    
-    delay_per_chunk = 0.0426  # ~42ms
-    
-    print("[LipSync] Iniciando sincronizacion labial...")
-    for amp in amplitudes:
-        smoothed_amp = min(amp * 1.5, 1.0)
-        await vts_client.send_parameter("MouthOpen", smoothed_amp)
-        await asyncio.sleep(delay_per_chunk)
-    
-    await vts_client.send_parameter("MouthOpen", 0.0)
-    print("[LipSync] Sincronizacion completada.")
 
-async def hablar_con_niu(texto_usuario: str):
-    """
-    Flujo completo: Cerebro -> TTS -> LipSync + Audio -> Expresiones
-    """
-    respuesta_niu = procesar_mensaje_niu("Rotceh", texto_usuario)
+async def hablar_con_niu(texto_usuario: str, brain: NiuBrain):
+    """Flujo completo: Cerebro -> texto -> TTS -> audio."""
+    respuesta_niu = await brain.procesar_mensaje("Rotceh", texto_usuario)
     print(f"\nNiu: {respuesta_niu}")
-    
-    archivo_audio = "core/voz_temp.wav"
-    os.makedirs("core", exist_ok=True)
-    
-    await sintetizar_y_reproducir_voz_async(respuesta_niu, archivo_audio)
-    
-    import threading
-    audio_thread = threading.Thread(target=lambda: winsound.PlaySound(archivo_audio, winsound.SND_FILENAME))
-    audio_thread.start()
-    
-    await sincronizar_labios(archivo_audio)
-    
-    audio_thread.join()
-    
-    if any(palabra in respuesta_niu.lower() for palabra in ["feliz", "alegre", "contenta", ":)", ":-)"]):
-        await vts_client.trigger_expression("MyAnimation_Trigger_Happy")
-    elif any(palabra in respuesta_niu.lower() for palabra in ["sorpresa", "sorprendida", "wow", "!!"]):
-        await vts_client.trigger_expression("MyAnimation_Trigger_Surprised")
-    elif any(palabra in respuesta_niu.lower() for palabra in ["triste", "tristeza", "llorar", ":("]):
-        await vts_client.trigger_expression("MyAnimation_Trigger_Sad")
-    elif any(palabra in respuesta_niu.lower() for palabra in ["enojada", "enojo", "enojado", ">:("]):
-        await vts_client.trigger_expression("MyAnimation_Trigger_Angry")
+
+    archivo_audio = os.path.abspath("dia_por_dia/voz_temp.mp3")
+    os.makedirs(os.path.dirname(archivo_audio), exist_ok=True)
+
+    exito_tts = await sintetizar_y_reproducir_voz_async(respuesta_niu, archivo_audio)
+    if not exito_tts:
+        print("❌ [Error] No se pudo generar el audio de Niu")
+        return
+
+    # VTube Studio hace el lip sync solo, escuchando el dispositivo virtual.
+    respuesta_lower = respuesta_niu.lower()
+    if any(p in respuesta_lower for p in ["feliz", "alegre", "contenta", ":)", ":-)"]):
+        await vts_client.trigger_expression("MouthSmile")
+    elif any(p in respuesta_lower for p in ["sorpresa", "sorprendida", "wow", "‼️"]):
+        await vts_client.trigger_expression("MouthOpen")
+    elif any(p in respuesta_lower for p in ["triste", "tristeza", "llorar", ":("]):
+        await vts_client.trigger_expression("MouthFrown")
+    elif any(p in respuesta_lower for p in ["enojada", "enojo", "enojado", ">:("]):
+        await vts_client.trigger_expression("MouthAngry")
+
+
+async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
+    """Bucle de conversación continua."""
+    if dispositivo_mic is None:
+        print("[AVISO] Sin micrófono. Usando teclado.")
+    else:
+        print(f"[MIC] Escuchando en {DISPOSITIVO_ENTRADA}. Di 'salir' para terminar.")
+
+    while True:
+        try:
+            if dispositivo_mic is None:
+                texto = await asyncio.to_thread(input, "Escribe tu mensaje: ")
+            else:
+                audio = await asyncio.to_thread(grabar_hasta_silencio, dispositivo_mic)
+                if audio is None:
+                    continue
+                # grabar_hasta_silencio entrega bytes PCM 16-bit a 16 kHz;
+                # el proveedor espera un array de numpy.
+                muestras = np.frombuffer(audio, dtype=np.int16)
+                inicio = time.perf_counter()
+                texto = await stt.transcribir(muestras, SAMPLE_RATE, IDIOMA_STT)
+                ms = (time.perf_counter() - inicio) * 1000
+                if not texto:
+                    print(f"[STT] No entendí ({ms:.0f} ms). Intenta otra vez.")
+                    continue
+                print(f"\n👤 Tú: {texto}   ({ms:.0f} ms)")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[SISTEMA] Entrada finalizada. Saliendo...")
+            break
+
+        if not texto.strip():
+            continue
+        if texto.strip().lower() in FRASES_SALIDA:
+            print("👋 ¡Hasta luego!")
+            break
+
+        await hablar_con_niu(texto, brain)
+
 
 async def main():
+    """Punto de entrada principal de Niu Autonomous Engine."""
     print("//////////////////////////////////////////////////////")
     print("[INFO] Iniciando Niu Autonomous Engine (Motor v2.5)")
     print("////////////////////////////////////////////////______\n")
 
+    # 1. Cerebro: Ollama local por defecto
+    brain = NiuBrain()
+
+    # 2. Conectar VTube Studio (opcional)
     print("[VTS] Intentando conectar con VTube Studio...")
     try:
         await vts_client.connect_and_auth()
     except Exception as e:
         print(f"[WARN] [Aviso VTS]: No se pudo conectar ({e}). Continuando en modo solo consola.")
 
-    while True:
-        print("\n---------------------------------------------------")
-        opcion = input("Como deseas interactuar con Niu?\n 1 - Hablar por Voz (Microfono)\n 2 - Escribir por Texto\n 4 - Salir\nElige una opcion: ").strip()
+    # 3. Localizar el micrófono
+    dispositivo_mic = buscar_dispositivo(DISPOSITIVO_ENTRADA, salida=False)
+    if dispositivo_mic is None:
+        print(f"[WARN] No encontré '{DISPOSITIVO_ENTRADA}'. Revisa Voicemeeter.")
 
-        if opcion == "1":
-            mi_voz = escuchar_microfono()
-            if mi_voz.startswith("ERROR_"):
-                print("Niu: Uy, no te entendi bien... ¿me lo repites?")
-                continue
-            
-            print(f"Tu (Voz): {mi_voz}")
-            await hablar_con_niu(mi_voz)
+    # 4. Motor de reconocimiento de voz (independiente del proveedor)
+    stt = None
+    if dispositivo_mic is not None:
+        try:
+            stt = crear_proveedor_stt()
+        except Exception as e:
+            print(f"[WARN] STT no disponible ({type(e).__name__}: {e}). Usando teclado.")
+            dispositivo_mic = None
 
-        elif opcion == "2":
-            txt = input("Tu (Texto): ").strip()
-            if not txt:
-                continue
-            await hablar_con_niu(txt)
+    if stt is not None and hasattr(stt, "preparar"):
+        print("[STT] Cargando el modelo de voz (la primera vez tarda)...")
+        await asyncio.to_thread(stt.preparar)
 
-        elif opcion == "4":
-            print("\n[INFO] Cerrando motor de Niu. Hasta luego, Rotceh-kun!")
-            await vts_client.close()
-            break
-        else:
-            print("[ERROR] Opcion no valida. Selecciona 1, 2 o 4.")
+    print("\n🎙️ Niu está lista.\n")
+    try:
+        await bucle_conversacion(brain, dispositivo_mic, stt)
+    finally:
+        await vts_client.close()
+        cerrar = getattr(brain.provider, "close", None)
+        if cerrar:
+            await cerrar()
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n[INFO] Programa interrumpido. Adios!")
+        print("\n[INFO] Programa interrumpido. ¡Adiós!")

@@ -72,14 +72,14 @@ class OllamaAdapter:
     async def generate_stream(
         self,
         messages: Messages,
-        system_intruction: str | None,
+        system_instruction: str | None,
         config: LLMConfig,
     ) -> AsyncIterator[str]:
         """
         Genera respuesta en streaming (trozo a trozo) para subtitulos en vivo
         Devuelve AsyncIterator[str] - cada yield es un trozo de texto.
         """
-        payload = self._build_payload(messages, system_intruction, config)
+        payload = self._build_payload(messages, system_instruction, config)
         payload["stream"] = True # Importante: tream=true
         
         async with self._client.stream(
@@ -92,7 +92,6 @@ class OllamaAdapter:
                 if not line.strip():
                     continue
                 # Cada linea es un JSON: {"message": {"content": "trozo"}, "done": false}
-                import json
                 chunk = json.loads(line)
                 content = chunk.get("message", {}).get("content", "")
                 if content:

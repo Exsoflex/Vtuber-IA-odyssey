@@ -12,25 +12,26 @@ Motor base funcional:
 - ✅ Lip-sync (RMS → MouthOpen)
 - ✅ Expresiones (keywords → hotkeys)
 - ✅ CLI interactivo (voz/texto)
+- ✅ Oído propio y desacoplado (Whisper local + Gemini), con captura corregida
 
 El proyecto ahora entra en una etapa de **comprensión, desacoplamiento y robustez**.
 
 ---
 
-# 🎯 FASE 2.5: DESACOPLAMIENTO DEL LLM — PRIORIDAD INMEDIATA
+# 🎯 FASE 2.5: DESACOPLAMIENTO DEL LLM — COMPLETADA (backend local)
 
-La API actual de Gemini no resulta adecuada como único backend para desarrollo continuo. El objetivo no es descartar el trabajo existente, sino convertir el cerebro en una arquitectura independiente del proveedor.
+La API de Gemini no resultaba adecuada como único backend. El cerebro ya depende de `LLMProvider` y usa Ollama por defecto, conservando memoria, personalidad, TTS y VTube Studio.
 
-| Tarea | Descripción | Resultado de aprendizaje |
-|-------|-------------|--------------------------|
-| Auditoría de `brain.py` | Entender exactamente cómo entra un mensaje y cómo sale una respuesta | Leer arquitectura existente |
-| Definir interfaz LLM | Diseñar qué necesita realmente Niu de un proveedor | Abstracción / interfaces |
-| Aislar Gemini | Mover detalles del SDK fuera del resto del cerebro | Separación de responsabilidades |
-| Probar backend Gemini | Confirmar que el comportamiento anterior se conserva | Refactor seguro |
-| Integrar Ollama | Crear un proveedor local compatible con la interfaz común | HTTP / JSON / servicios locales |
-| Selector de proveedor | Configurar qué backend utilizar | Configuración y arquitectura |
-| Comparación | Medir latencia, calidad, estabilidad y consumo | Observabilidad y toma de decisiones |
-| Fallback futuro | Diseñar una estrategia local + nube opcional | Arquitectura resiliente |
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Auditoría de `brain.py` | Entender cómo entra y sale un mensaje | ✅ |
+| Definir interfaz LLM | `LLMProvider` en `core/llm_provider.py` | ✅ |
+| Aislar Gemini | El SDK ya no se usa fuera del adaptador | ✅ |
+| Integrar Ollama | `OllamaAdapter` vía `/api/chat` | ✅ |
+| Selector de proveedor | `OLLAMA_MODEL` en `.env` | ✅ |
+| Comparación | Medir latencia, calidad y consumo | ⏳ |
+| Fallback futuro | Estrategia local + nube opcional | ⏳ |
+| `GeminiAdapter` | Volver a poder usar Gemini tras la interfaz | ⏳ |
 
 ### Criterio de éxito
 
@@ -47,6 +48,38 @@ Ollama
 ```
 
 sin modificar la lógica de memoria, personalidad, TTS o VTube Studio más de lo estrictamente necesario.
+
+---
+
+# 🎯 FASE 2.6: OÍDO DESACOPLADO — COMPLETADA ✅
+
+Mismo patrón que el cerebro: la captura no sabe quién transcribe.
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Interfaz STT | `STTProvider` en `core/stt_provider.py` | ✅ |
+| Adaptador local | `faster-whisper` large-v3 en GPU, con fallback a CPU int8 | ✅ |
+| Adaptador nube | Gemini (`gemini-3.5-transcribe`) con modelo de respaldo | ✅ |
+| Selector | `NIU_STT=whisper\|gemini` y `NIU_STT_IDIOMA` en `.env` | ✅ |
+| Remuestreo correcto | FFT con antialiasing en vez de interpolación lineal | ✅ |
+| Bug de captura | `channels=1` sobre un micrófono estéreo corrompía el audio | ✅ corregido |
+| Contexto del decoder | `initial_prompt` para que reconozca el nombre «Niu» | ✅ |
+| Precarga | El modelo se carga al arrancar, no tras la primera frase | ✅ |
+| Verificación | 3/3 frases transcritas de extremo a extremo | ✅ |
+
+### Criterio de éxito (cumplido)
+
+```text
+STTProvider
+   ├── whisper  (local: sin cuotas, sin internet, privado)
+   └── gemini   (nube: robusto con audio difícil)
+```
+
+Cambiar de motor sin tocar `core/stt.py` ni `main.py`: solo una variable de entorno.
+
+### Lo que costó encontrarlo
+
+El síntoma afectaba a **todos** los motores (Google devolvía vacío, Whisper alucinaba, Gemini inventaba idiomas) y el nivel de audio era normal. Antes de encontrar la causa se descartaron con mediciones: ruido de habitación, reverberación, retumbe de graves, filtros paso alto, tamaño del modelo, procesado de Windows (Nahimic/Intel SST), reloj del dispositivo y velocidad de muestreo. Lección: si fallan todos los motores, sospechar de la capa común, no de los motores.
 
 ---
 
@@ -158,16 +191,15 @@ perf:     Optimización
 
 # 📌 PRÓXIMO HITO
 
-**No continuar con una nueva funcionalidad grande todavía.**
+**Objetivo: probar la conversación completa y medir la latencia de punta a punta.**
 
-Primero:
+1. Ejecutar `main.py` y comprobar el ciclo completo: voz → STT → Ollama → TTS → VTube Studio.
+2. Medir la latencia desglosada (captura, STT, LLM, TTS) y anotarla.
+3. Ajustar `UMBRAL_MINIMO` del VAD si corta frases o no detecta el inicio.
+4. Añadir tests del cerebro, del `OllamaAdapter` y del detector de silencio.
+5. Sustituir `print` por logging.
+6. Implementar `GeminiAdapter` si se quiere volver a la nube.
 
-1. Auditar `brain.py`.
-2. Comprender qué parte es memoria/personality y qué parte es Gemini.
-3. Diseñar la frontera entre Niu y un proveedor LLM.
-4. Implementar el cambio de forma incremental.
-5. Añadir Ollama como segundo proveedor.
+Pregunta guía del hito:
 
-El objetivo del siguiente hito es que el estudiante pueda responder con sus propias palabras:
-
-> "¿Qué necesita realmente Niu de un modelo de lenguaje y qué cosas no deberían depender del modelo?"
+> "¿Dónde se va el tiempo entre que hablo y Niu responde, y qué parte de ese tiempo controlo yo?"

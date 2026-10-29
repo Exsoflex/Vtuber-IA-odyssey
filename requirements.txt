@@ -2,7 +2,19 @@ google-genai
 python-dotenv
 Pillow
 SpeechRecognition
-PyAudio
-pygame
+sounddevice
+soundfile
+numpy
+httpx
 edge-tts
 websockets
+
+# ─── STT local (NIU_STT=whisper) ───────────────────────────────────────────
+# faster-whisper: reimplementación de Whisper sobre CTranslate2 (4-10x más
+# rápido y con cuantización int8).
+faster-whisper
+# Con GPU NVIDIA, CTranslate2 carga cublas64_12.dll y cuDNN. Estos paquetes
+# las instalan dentro de site-packages; core/stt_whisper.py las añade al PATH
+# al arrancar. Sin GPU se puede omitir el bloque (Whisper usa CPU int8).
+nvidia-cublas-cu12; sys_platform == "win32" or sys_platform == "linux"
+nvidia-cudnn-cu12;  sys_platform == "win32" or sys_platform == "linux"
