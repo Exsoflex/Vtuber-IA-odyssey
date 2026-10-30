@@ -23,6 +23,17 @@ SAMPLE_RATE = 16000      # Hz, formato que esperan los motores de STT
 BLOQUE = 0.1             # segundos por bloque analizado
 UMBRAL_MINIMO = 200.0    # RMS mínimo para considerar que hay voz
 
+# Cuánto silencio hay que oír para dar la frase por terminada.
+#
+# Esto es tiempo muerto puro: hasta que no transcurre, Niu no sabe que has
+# acabado de hablar. 1,0 s era muy conservador: se notaba como un segundo de
+# nada antes de que la transcripción siquiera empezara.
+#
+# 0,6 s aguanta las pausas normales al respirar, pero si Niu te corta a media
+# frase, súbelo con la variable de entorno:
+#     $env:NIU_SILENCIO_FINAL = "0.8"
+SILENCIO_FINAL = float(os.getenv("NIU_SILENCIO_FINAL", "0.6"))
+
 FRASES_SALIDA = {"salir", "adiós", "adios", "terminar", "hasta luego"}
 
 
@@ -65,7 +76,7 @@ def _remuestrear_int16(datos: np.ndarray, fs_origen: int, fs_destino: int) -> np
 def grabar_hasta_silencio(
     dispositivo: int | None = None,
     timeout_inicio: float = 8.0,
-    silencio_final: float = 1.0,
+    silencio_final: float = SILENCIO_FINAL,
     duracion_maxima: float = 15.0,
 ) -> bytes | None:
     """

@@ -67,9 +67,18 @@ class WhisperSTT:
         hilos: int | None = None,
         prompt: str | None = None,
     ) -> None:
-        self.modelo_nombre = modelo or os.getenv("NIU_WHISPER_MODELO", "large-v3")
+        self.modelo_nombre = modelo or os.getenv("NIU_WHISPER_MODELO", "large-v3-turbo")
         self.dispositivo = (dispositivo or os.getenv("NIU_WHISPER_DISPOSITIVO", "auto")).lower()
         self.hilos = hilos or int(os.getenv("NIU_WHISPER_HILOS", "0")) or None
+
+        # Cuántas hipótesis explora el decodificador. `beam_size=5` calcula
+        # cinco y se queda con la mejor: más calidad, ~5 veces más trabajo.
+        #
+        # Con large-v3 (32 capas de decodificador) eso costaba segundos. Con
+        # large-v3-turbo (4 capas) la decodificación ya es barata, así que
+        # beam=1 es la opción sensata para conversación en tiempo real: si
+        # alguna frase sale rara, súbelo con NIU_WHISPER_BEAM=5.
+        self.beam_size = int(os.getenv("NIU_WHISPER_BEAM", "1"))
         # "" (vacío) desactiva el contexto a propósito.
         if prompt is None:
             prompt = os.getenv("NIU_STT_PROMPT", PROMPT_POR_DEFECTO)
@@ -149,7 +158,7 @@ class WhisperSTT:
         segmentos, _ = modelo.transcribe(
             x,
             language=idioma or None,        # None = detección automática (es/en/...)
-            beam_size=5,
+            beam_size=self.beam_size,
             vad_filter=True,                # descarta lo que no es voz
             condition_on_previous_text=False,  # evita que se "invente" una frase arrastrada
             initial_prompt=self.prompt,     # sesga el vocabulario (nombre "Niu", etc.)

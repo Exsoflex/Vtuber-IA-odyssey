@@ -361,6 +361,7 @@ async def hablar_con_lipsync(
     texto: str,
     archivo_audio: str = "core/voz_temp.mp3",
     voz: str = tts.VOZ_NIU,
+    medidas: dict[str, float] | None = None,
 ) -> bool:
     """Dice una frase con voz y mueve la boca a la vez.
 
@@ -380,16 +381,26 @@ async def hablar_con_lipsync(
         texto: lo que Niu va a decir.
         archivo_audio: archivo temporal donde guardar el audio.
         voz: voz de Edge-TTS.
+        medidas: diccionario opcional donde anotar los tiempos de cada etapa
+            (`sintesis`, `preparacion`, `voz`). Sirve para diagnosticar la
+            latencia sin ensuciar la salida normal.
 
     Returns:
         True si se generó y reprodujo el audio.
     """
+    inicio = time.perf_counter()
     if not await tts.sintetizar_voz_async(texto, archivo_audio, voz):
         return False
+    if medidas is not None:
+        medidas["sintesis"] = time.perf_counter() - inicio
 
+    inicio = time.perf_counter()
     audio = tts.preparar_audio(archivo_audio)
     if audio is None:
         return False
+    if medidas is not None:
+        medidas["preparacion"] = time.perf_counter() - inicio
+        medidas["voz"] = audio.duracion
 
     boca = envolvente(audio.mono, audio.fs)
     parametro = await resolver_parametro()

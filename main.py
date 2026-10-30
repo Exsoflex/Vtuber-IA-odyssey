@@ -38,9 +38,14 @@ DISPOSITIVO_ENTRADA = os.getenv("NIU_MIC", "DGM20 USB Microphone")
 IDIOMA_STT = os.getenv("NIU_STT_IDIOMA", "").strip().lower() or None
 
 
-async def hablar_con_niu(texto_usuario: str, brain: NiuBrain):
+async def hablar_con_niu(texto_usuario: str, brain: NiuBrain,
+                         tiempos: dict[str, float] | None = None):
     """Flujo completo: Cerebro -> texto -> TTS con lip sync -> audio."""
+    tiempos = tiempos if tiempos is not None else {}
+
+    inicio = time.perf_counter()
     respuesta_niu = await brain.procesar_mensaje("Rotceh", texto_usuario)
+    tiempos["cerebro"] = time.perf_counter() - inicio
     print(f"\nNiu: {respuesta_niu}")
 
     archivo_audio = os.path.abspath("dia_por_dia/voz_temp.mp3")
@@ -48,10 +53,15 @@ async def hablar_con_niu(texto_usuario: str, brain: NiuBrain):
 
     # Sintetiza, reproduce y mueve la boca. La boca la calcula Niu a partir de
     # su propio audio: no depende del micrófono de VTube Studio.
-    exito_tts = await hablar_con_lipsync(respuesta_niu, archivo_audio)
+    # `tiempos` se rellena con lo que tardó cada etapa: sin números, optimizar
+    # la latencia es adivinar.
+    exito_tts = await hablar_con_lipsync(respuesta_niu, archivo_audio,
+                                         medidas=tiempos)
     if not exito_tts:
         print("❌ [Error] No se pudo generar el audio de Niu")
         return
+
+    mostrar_tiempos(tiempos)
 
     respuesta_lower = respuesta_niu.lower()
     if any(p in respuesta_lower for p in ["feliz", "alegre", "contenta", ":)", ":-)"]):
@@ -64,6 +74,20 @@ async def hablar_con_niu(texto_usuario: str, brain: NiuBrain):
         await vts_client.trigger_expression("MouthAngry")
 
 
+def mostrar_tiempos(t: dict[str, float]) -> None:
+    """Resume la latencia del turno: de tu silencio al primer sonido.
+
+    La columna que importa es la última. Las demás dicen *dónde* se fue el
+    tiempo, que es lo que permite decidir qué optimizar después.
+    """
+    hasta_sonido = sum(t.get(k, 0.0) for k in ("stt", "cerebro", "sintesis", "preparacion"))
+    print(
+        f"⏱️  STT {t.get('stt', 0.0):.2f} | cerebro {t.get('cerebro', 0.0):.2f} | "
+        f"TTS {t.get('sintesis', 0.0):.2f} | preparar {t.get('preparacion', 0.0):.2f} | "
+        f"hablando {t.get('voz', 0.0):.2f} | ➜ primer sonido {hasta_sonido:.2f} s"
+    )
+
+
 async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
     """Bucle de conversación continua."""
     if dispositivo_mic is None:
@@ -73,6 +97,7 @@ async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
 
     while True:
         try:
+            tiempos: dict[str, float] = {}
             if dispositivo_mic is None:
                 texto = await asyncio.to_thread(input, "Escribe tu mensaje: ")
             else:
@@ -84,7 +109,8 @@ async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
                 muestras = np.frombuffer(audio, dtype=np.int16)
                 inicio = time.perf_counter()
                 texto = await stt.transcribir(muestras, SAMPLE_RATE, IDIOMA_STT)
-                ms = (time.perf_counter() - inicio) * 1000
+                tiempos["stt"] = time.perf_counter() - inicio
+                ms = tiempos["stt"] * 1000
                 if not texto:
                     print(f"[STT] No entendí ({ms:.0f} ms). Intenta otra vez.")
                     continue
@@ -99,7 +125,7 @@ async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
             print("👋 ¡Hasta luego!")
             break
 
-        await hablar_con_niu(texto, brain)
+        await hablar_con_niu(texto, brain, tiempos)
 
 
 async def main():
@@ -110,6 +136,13 @@ async def main():
 
     # 1. Cerebro: Ollama local por defecto
     brain = NiuBrain()
+
+    # Cargar el modelo ahora, no en mitad de la primera frase. Es opcional:
+    # si el proveedor no lo soporta o falla, se sigue igual.
+    preparar_llm = getattr(brain.provider, "preparar", None)
+    if preparar_llm is not None:
+        print("[LLM] Cargando el modelo de lenguaje (la primera vez tarda)...")
+        await preparar_llm()
 
     # 2. Conectar VTube Studio (opcional)
     print("[VTS] Intentando conectar con VTube Studio...")
