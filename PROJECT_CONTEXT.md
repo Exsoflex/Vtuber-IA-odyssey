@@ -79,7 +79,8 @@ core/lipsync.py  (sintetiza, calcula la boca y reproduce)
 - ✅ Conexión persistente con VTube Studio.
 - ✅ Entrada de voz con `sounddevice` (sin PyAudio) y detección de silencio por RMS.
 - ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
-- ✅ Whisper `large-v3` en GPU (RTX 4050): 0,9–1,6 s por frase. Fallback a CPU int8.
+- ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
+- ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -143,6 +144,10 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 | Hecho | Whisper local como motor por defecto | Sin cuotas, sin internet y sin enviar la voz a terceros |
 | Hecho | Capturar con los canales nativos del micro y elegir canal en Python | Pedir `channels=1` a un dispositivo estéreo corrompe el audio en WASAPI |
 | Hecho | `initial_prompt` con el nombre «Niu» | Sin contexto, el decoder lo sustituía por «New»/«Neil» |
+| Hecho | Whisper `large-v3-turbo` + `beam_size=1` | Mismo encoder con decodificador de 4 capas en vez de 32: 5,94 s → 0,45 s con el mismo texto |
+| Hecho | `preparar()` en el proveedor LLM | El primer turno pagaba 9,5 s de carga en frío; ahora se paga al arrancar |
+| Hecho | `keep_alive` de 30 min en Ollama | Con los 5 min por defecto, una pausa descargaba el modelo y volvía el coste |
+| Hecho | `silencio_final` 1,0 → 0,6 s | Era tiempo muerto puro antes de empezar a transcribir |
 | Pendiente | `GeminiAdapter` | Poder alternar entre local y nube |
 
 ---
@@ -173,7 +178,7 @@ El backend local ya está integrado y responde, el oído funciona de extremo a e
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
 - Hay tests de la envolvente (`tests/`), pero no del cerebro ni del adaptador LLM.
 
-**Objetivo inmediato:** medir la latencia total (voz → respuesta → voz) y después añadir logging y tests del cerebro.
+**Objetivo inmediato:** convertir cerebro → TTS → reproducción en una tubería por frases (streaming), para que la primera palabra suene a ~1,2 s en vez de a ~4,7 s. Después, logging y tests del cerebro.
 
 ### Caso resuelto: «Niu responde pero no se la oye»
 
@@ -266,6 +271,44 @@ Lecciones:
 3. **Antes de arreglar una pieza, pregunta si sigue haciendo falta.** Eliminar Voicemeeter resolvió el problema y mejoró la latencia sin añadir una sola línea de código.
 
 
+### Caso resuelto: «tarda 16-20 s en contestar»
+
+Síntoma: la conversación funcionaba, pero entre callar y oír a Niu pasaban muchos segundos. La estimación inicial era «40 % transcripción, 10-20 % texto, el resto el TTS». Se midió, y el reparto real era distinto.
+
+Punto de partida, medido:
+
+| etapa | medido | peso |
+|---|---|---|
+| espera de silencio antes de cortar | 1,0 s | 9 % |
+| **Whisper large-v3, beam 5** | **5,3–6,6 s** | **55 %** |
+| cerebro esperando la respuesta completa | 1,9–3,8 s | 25 % |
+| Edge-TTS | 0,6 s | 6 % |
+
+Dos correcciones: la transcripción pesaba **más** de lo supuesto, y el TTS **no** era el culpable (0,57 s para una frase que suena 15 s).
+
+Además, los «16-20 s» percibidos incluían el tiempo que Héctor pasa hablando: el silencio real hasta el primer sonido era de unos 10-11 s.
+
+Qué se hizo, con el ahorro medido de cada cosa:
+
+| cambio | antes | después |
+|---|---|---|
+| `large-v3` + `beam 5` → `large-v3-turbo` + `beam 1` | 5,94 s | **0,45 s** |
+| `preparar()` del LLM al arrancar | primer turno 9,48 s | 2,6–4,2 s |
+| `keep_alive` 5 min → 30 min | una pausa recargaba el modelo | sigue cargado |
+| `silencio_final` 1,0 → 0,6 s | 1,0 s | 0,6 s |
+
+Por qué funciona cada uno:
+
+- **`turbo`**: mismo encoder, decodificador de 4 capas en vez de 32. El texto transcrito salió idéntico en la prueba.
+- **`beam_size=5` → `1`**: beam 5 calcula cinco hipótesis y se queda con la mejor; quintuplica la decodificación para una mejora marginal.
+- **`preparar()`**: el coste de cargar el modelo no desaparece, solo se elige *cuándo* pagarlo. Al arrancar no hay nadie esperando una respuesta.
+
+Riesgo comprobado antes de adoptar `turbo`: la RTX 4050 tiene 6 GB y los dos modelos tienen que convivir. Con `turbo` (~1,6 GB) y Ollama (~4,4 GB): **5797 / 6141 MiB**, sin que Ollama caiga a CPU. Quedan ~350 MB de margen, así que conviene no añadir otro modelo grande a la vez.
+
+Resultado: primer sonido de **10,7 s → 4,7 s** (sin contar STT, medido por teclado). Con el micrófono y `turbo` queda en ~5 s.
+
+Lo que falta, y es el cambio grande: `main.py` sigue esperando la respuesta **completa** del cerebro (3,8 s) antes de sintetizar. Con `procesar_mensaje_streaming`, el primer token llega a los 0,27 s y la primera frase completa a los 0,62 s: sintetizando esa primera frase mientras el modelo sigue escribiendo, se empezaría a hablar en ~1,2 s.
+
 ### Caso resuelto: «el micrófono no entendía»
 
 Síntoma: el micrófono capturaba, el nivel era correcto (−30 dBFS), pero todos los motores fallaban (Google devolvía vacío, Whisper alucinaba «¡Suscríbete!», Gemini inventaba otros idiomas).
@@ -342,6 +385,11 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Suavizado asimétrico**: abrir rápido y cerrar despacio es lo que diferencia una boca de un vúmetro.
 - **Definiciones duplicadas en Python**: si un método se define dos veces en la misma clase, la segunda sustituye a la primera sin avisar; el código anterior queda muerto y engaña al leerlo.
 - **Separar producir de usar**: `tts.py` genera y prepara el audio sin reproducirlo, para que el lip sync pueda analizarlo antes de que suene. Una función que "hace todo" no deja hueco para observar sus partes.
+- **Presupuesto de latencia**: en un sistema hablado, lo que importa no es "cuánto tarda en total" sino "cuánto tarda en sonar la primera palabra". Cada etapa se mide por separado, porque la intuición reparte mal el tiempo (se culpó al TTS, que costaba 0,6 s, cuando el 55 % era la transcripción).
+- **`beam_size` no es un detalle de calidad, es un multiplicador de coste**: explorar cinco hipótesis y quedarse con una cuesta ~5 veces más que explorar una.
+- **Mover el coste, no eliminarlo**: cargar un modelo cuesta lo mismo tarde o temprano. El truco es pagarlo al arrancar, cuando nadie espera respuesta, en vez de en la primera frase.
+- **`keep_alive` y la memoria de un servidor de modelos**: un modelo local puede descargarse solo tras unos minutos de inactividad. Para una conversación con pausas, eso significa volver a pagar la carga varias veces.
+- **VRAM es un recurso compartido**: dos modelos en la misma GPU compiten. Antes de cambiar uno, comprobar que los dos caben; si no, el segundo cae a CPU y gana el que parecía la mejora.
 
 ### Aún no asumir dominio completo de
 

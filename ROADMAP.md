@@ -135,6 +135,49 @@ El último tramo fue el audio: la boca se movía pero no se oía nada. La señal
 
 ---
 
+# 🎯 FASE 2.8: LATENCIA
+
+La beta `v0.1.0-beta` ya conversa de punta a punta. El problema deja de ser «¿funciona?» y pasa a ser «¿se siente como una conversación?». Objetivo: de 10,7 s a unos 2 s hasta la primera palabra.
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Cronómetro por etapa | `main.py` imprime STT, cerebro, TTS, preparar y el total hasta el primer sonido | ✅ |
+| Whisper rápido | `large-v3-turbo` + `beam_size=1`: 5,94 s → 0,45 s con el mismo texto | ✅ |
+| Silencio de corte | 1,0 s → 0,6 s, configurable con `NIU_SILENCIO_FINAL` | ✅ |
+| Modelo caliente | `preparar()` en el proveedor LLM: la carga se paga al arrancar, no en la primera frase | ✅ |
+| No descargar el modelo | `keep_alive` de 30 min en lugar de los 5 min por defecto | ✅ |
+| Comprobar la VRAM | `turbo` (1,6 GB) + Ollama (4,4 GB) = 5797/6141 MiB, sin caídas a CPU | ✅ |
+| Tubería por frases | Cerebro en streaming → cortar por frase → sintetizar → encolar reproducción | ⚠️ pendiente |
+| Respuestas más cortas | Ahora duran 15 s de audio: no bloquean con streaming, pero alargan el turno | ⚠️ pendiente |
+| Barge-in | Poder interrumpir a Niu mientras habla | ⚠️ pendiente |
+
+### Criterio de éxito
+
+```text
+silencio → primer sonido ≤ 2 s, y la boca sigue cuadrando con la voz
+
+presupuesto previsto:
+  VAD 0,6 s | STT 0,45 s | primera frase del LLM 0,6 s | TTS de esa frase 0,6 s
+```
+
+### Pregunta guía del hito
+
+> "Niu tarda 10 s en contestar. ¿Qué parte del sistema lo está frenando?"
+
+```text
+No se puede responder sin números. Y la intuición falla: el TTS, que parecía el
+sospechoso por ser "el que habla", costaba 0,6 s; la transcripción, invisible en
+el reloj de pared, costaba 5,9.
+```
+
+### Lo que costó encontrarlo
+
+El primer reparto se hizo a ojo y colocaba el 40 % en la transcripción. Medido, era el 55 %. Y el «delay de 16-20 s» incluía el tiempo que el propio Héctor pasa hablando: el silencio real era de 10-11 s.
+
+El aprendizaje más útil no fue el modelo nuevo, sino **dónde se paga cada coste**. Cargar un modelo cuesta lo mismo siempre; la pregunta es si se paga al arrancar o en mitad de la primera frase.
+
+---
+
 # 🎯 FASE 3: ROBUSTEZ Y CALIDAD
 
 | Tarea | Descripción |
