@@ -29,10 +29,15 @@ UMBRAL_MINIMO = 200.0    # RMS mínimo para considerar que hay voz
 # acabado de hablar. 1,0 s era muy conservador: se notaba como un segundo de
 # nada antes de que la transcripción siquiera empezara.
 #
-# 0,6 s aguanta las pausas normales al respirar, pero si Niu te corta a media
-# frase, súbelo con la variable de entorno:
-#     $env:NIU_SILENCIO_FINAL = "0.8"
-SILENCIO_FINAL = float(os.getenv("NIU_SILENCIO_FINAL", "0.6"))
+# Ojo con bajarlo demasiado. Medido a 0,6 s: en frases largas con una pausa
+# natural en medio (respirar, buscar la palabra), el corte llega antes de
+# tiempo y la frase se parte en dos. Las pausas al hablar duran más de lo que
+# uno cree.
+#
+# 0,9 s es el equilibrio: se ahorra una décima respecto al original y aguanta
+# respiraciones. Si aún te corta, súbelo sin tocar código:
+#     $env:NIU_SILENCIO_FINAL = "1.1"
+SILENCIO_FINAL = float(os.getenv("NIU_SILENCIO_FINAL", "0.9"))
 
 FRASES_SALIDA = {"salir", "adiós", "adios", "terminar", "hasta luego"}
 
