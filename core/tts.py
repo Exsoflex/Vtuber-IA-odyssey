@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 from dotenv import load_dotenv
 
-from core.audio_devices import buscar_dispositivo
+from core.audio_devices import buscar_dispositivo, buscar_salida_por_defecto
 
 load_dotenv()
 
@@ -53,21 +53,24 @@ VOZ_NIU = "es-MX-DaliaNeural"  # Voz natural en español de Edge-TTS
 VELOCIDAD = "+0%"              # Velocidad normal
 TONO = "+0Hz"                  # Edge-TTS usa Hz para el tono, no porcentaje
 
-TARGET_SAMPLE_RATE = 48000  # Hz, frecuencia del mezclador de Voicemeeter
+TARGET_SAMPLE_RATE = 48000  # Hz; se remuestrea aquí para no depender del endpoint
 
-# Salida de voz: por aquí escucha VTube Studio para el lip sync.
+# Salida de voz.
 #
-# OJO con el nombre. En este driver (Voicemeeter "8 points") existen dos
-# familias de endpoints que se parecen:
-#   "Voicemeeter Input"                 -> Strip 3 (Virtual VAIO)  <-- el bueno
-#   "Voicemeeter In 1" ... "In 5"       -> puntos de entrada hardware
+# Por defecto (sin variable de entorno) Niu suena donde suena Windows: se coge
+# el dispositivo de salida predeterminado del sistema y se busca ese mismo
+# dispositivo en el mejor backend disponible. Así no queda clavado al hardware
+# de este equipo: si el usuario cambia de auriculares, Niu se muda con él.
 #
-# Comprobado midiendo el bus B1 mientras se reproducía un tono:
-#   "Voicemeeter In 1" -> -240 dBFS (silencio digital, no llega a ningún lado)
-#   "Voicemeeter Input" ->  -12 dBFS (llega a VAIO -> A1 + B1)
+# Para forzar otro dispositivo, variable de entorno:
+#     $env:NIU_SALIDA = "Voicemeeter Input"
 #
-# Con "Voicemeeter In 1" Niu "reproducía" sin error y no sonaba nada.
-DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA", "Voicemeeter Input")
+# Historia: antes la voz iba a "Voicemeeter Input" para que VTube Studio la
+# escuchara por el cable virtual y moviera la boca. Ese camino se abandonó (ver
+# core/lipsync.py): ahora la boca la mueve Niu a partir de su propia onda, así
+# que el audio puede ir directo a los auriculares. Un salto menos, menos
+# latencia y una pieza menos que puede romperse.
+DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA") or None
 
 
 @dataclass
@@ -177,11 +180,12 @@ def preparar_audio(ruta_audio: str) -> AudioPreparado | None:
 
     1. Lee el archivo como float32 (rango -1.0 a 1.0, que es lo que usa
        sounddevice; los enteros de 16 bits no valen directamente).
-    2. Remuestrea a 48 kHz, la frecuencia del mezclador de Voicemeeter.
-    3. Rellena con silencio hasta el número de canales del endpoint. El
-       endpoint de Voicemeeter expone 8 canales y hay que entregarle
-       exactamente ese número; los sobrantes van en silencio y Voicemeeter usa
-       los dos primeros.
+    2. Remuestrea a 48 kHz, una frecuencia que casi todos los endpoints
+       aceptan (los virtuales de Windows trabajan a 48 kHz de forma nativa).
+    3. Coloca la voz en los canales que espera el endpoint. El endpoint puede
+       declarar más canales de los que existen de verdad (el de DirectSound
+       dice 8, formato 7.1), pero la voz es mono: va en los dos primeros y el
+       resto en silencio.
 
     Returns:
         `AudioPreparado` o None si no se pudo leer.
@@ -211,7 +215,13 @@ def preparar_audio(ruta_audio: str) -> AudioPreparado | None:
     if device_id is not None:
         canales = int(sd.query_devices(device_id)["max_output_channels"]) or 1
 
-    salida = np.repeat(mono[:, None], canales, axis=1).astype(np.float32)
+    if canales < 2:
+        salida = mono[:, None].astype(np.float32)
+    else:
+        # Duplicar la voz en los 8 canales haría que el sistema la mezcle varias
+        # veces al bajar a estéreo; mejor callar los que no van a sonar.
+        silencio = np.zeros_like(mono)
+        salida = np.column_stack([mono, mono, *[silencio] * (canales - 2)]).astype(np.float32)
 
     return AudioPreparado(mono=mono.astype(np.float32), salida=salida,
                           fs=fs, device_id=device_id)
@@ -230,12 +240,13 @@ def reproducir_audio(audio: AudioPreparado) -> None:
         return
 
     if audio.device_id is None:
-        print(f"[WARN] No encontré '{DISPOSITIVO_SALIDA}', usando el dispositivo "
-              f"por defecto")
+        print("[WARN] No encontré dispositivo de salida, usando el que Windows "
+              "tenga por defecto")
         sd.play(audio.salida[:, 0], audio.fs)
     else:
-        print(f"[TTS] Reproduciendo en {DISPOSITIVO_SALIDA} "
-              f"(device_id={audio.device_id}, sr={audio.fs} Hz)...")
+        nombre = sd.query_devices(audio.device_id)["name"]
+        print(f"[TTS] Reproduciendo en [{audio.device_id}] {nombre} "
+              f"({audio.fs} Hz)...")
         sd.play(audio.salida, audio.fs, device=audio.device_id)
 
     sd.wait()
@@ -272,9 +283,15 @@ async def sintetizar_y_reproducir_voz_async(
 
 
 def _buscar_dispositivo_salida() -> int | None:
-    """Busca el dispositivo virtual de salida de audio."""
+    """Busca el dispositivo de salida de audio.
+
+    Sin `NIU_SALIDA` en el entorno devuelve el que Windows tenga por defecto;
+    con ella, el primero cuyo nombre contenga ese texto.
+    """
     if not SOUNDDEVICE_AVAILABLE:
         return None
+    if not DISPOSITIVO_SALIDA:
+        return buscar_salida_por_defecto()
     return buscar_dispositivo(DISPOSITIVO_SALIDA, salida=True)
 
 

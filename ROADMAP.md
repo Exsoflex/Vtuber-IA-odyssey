@@ -89,9 +89,9 @@ Del oído pasamos a la boca: que Niu se oiga y que el avatar la acompañe.
 
 | Tarea | Descripción | Estado |
 |-------|-------------|--------|
-| Salida de TTS | `Voicemeeter In 1` no alimenta ninguna tira; el destino es `Voicemeeter Input` | ✅ |
-| Canales de salida | El endpoint expone 8 canales: se rellenan con silencio, no se duplican a 2 | ✅ |
-| Verificación objetiva | Tono y frase reales medidos en el bus B1 (−34 dBFS, 3,8 s de señal) | ✅ |
+| Salida de TTS | Directo al endpoint de salida de Windows (auriculares DGM20); `NIU_SALIDA` permite forzar otro | ✅ |
+| Canales de salida | El endpoint de DirectSound declara 8 canales: la voz va en los 2 primeros y el resto en silencio | ✅ |
+| Verificación objetiva | Tono y frase reales medidos en el bus B1 (−34 dBFS, 3,8 s de señal); después se confirmó de oído | ✅ |
 | Reconexión con VTS | Reintentos (5 × 2 s) en vez de rendirse ante `WinError 1225` | ✅ |
 | Limpieza de `vts_client.py` | Métodos definidos 4 veces; se conserva solo la versión viva (504 → 233 líneas) | ✅ |
 | Transporte de VTS | Un solo punto de salida (`peticion()`) con lock: dos corrutinas no pueden cruzarse respuestas | ✅ |
@@ -100,19 +100,18 @@ Del oído pasamos a la boca: que Niu se oiga y que el avatar la acompañe.
 | Parámetro propio | `NiuMouthOpen` creado por API; respaldo automático a `VoiceVolumePlusMouthOpen` | ✅ |
 | Prueba del lip sync | `probar_lipsync.py`: mide `ParamMouthOpenY` por la API mientras Niu habla | ✅ |
 | Tests de la envolvente | 16 tests en `tests/test_envolvente.py` (pytest) | ✅ |
-| Mapeo en el modelo | Falta asignar `NiuMouthOpen` a `Mouth Open` en VTS (paso manual, una vez) | ⚠️ pendiente |
+| Mapeo en el modelo | `NiuMouthOpen` asignado a `Mouth Open` en VTS (lo hizo el estudiante, una vez) | ✅ |
 | Expresiones | Los hotkeys `MouthSmile`/`MouthFrown`/`MouthAngry`/`MouthOpen` no existen en el modelo | ⚠️ pendiente |
 
 ### Criterio de éxito
 
 ```text
-voz de Niu → Voicemeeter (strip VAIO) → A1 auriculares   (se oye)
-                                     → (nada: el lip sync ya no depende de este bus)
+voz de Niu → endpoint de salida de Windows (auriculares DGM20)   (se oye)
 
 audio de Niu → envolvente 0..1 (40 Hz) → API de VTS → NiuMouthOpen → ParamMouthOpenY
 ```
 
-Medido: 298/298 frames en 7,45 s para 7,46 s de audio, con `ParamMouthOpenY` de 0 a 2,30.
+Medido: 298/298 frames en 7,45 s para 7,46 s de audio, con `ParamMouthOpenY` de 0 a 2,30. Audio y boca confirmados de oído y de vista.
 
 ### Pregunta guía del hito
 
@@ -121,6 +120,9 @@ Medido: 298/298 frames en 7,45 s para 7,46 s de audio, con `ParamMouthOpenY` de 
 ```text
 La respuesta está en el otro extremo de la cadena: grabar el bus donde debería
 sonar y medir. Un "sin errores" en el origen no prueba nada en el destino.
+
+Y si la medición dice que no llega, la pregunta siguiente no es "¿cómo lo
+arreglo?" sino "¿esta pieza sigue haciendo falta?".
 ```
 
 ### Lo que costó encontrarlo
@@ -128,6 +130,8 @@ sonar y medir. Un "sin errores" en el origen no prueba nada en el destino.
 El primer intento fue dejar que VTS escuchara el bus B1. Falló porque Unity cachea los dispositivos de audio al arrancar y no se recupera si Voicemeeter se reinicia después (`Failed to initialize microphone (timeout)`, y más tarde `Activating microphone: ""` con la lista vacía). En vez de pelear con Unity, se eliminó la dependencia: Niu calcula la boca de su propio audio.
 
 Y el desfase final no era de VTS ni de la red: `asyncio.sleep` en Windows se despierta en múltiplos de 15,6 ms. Un bucle de 40 Hz pedía 25 ms y recibía 31,2. Lección: cuando un bucle "en tiempo real" se retrasa sistemáticamente, hay que medir el reloj antes de culpar a la red.
+
+El último tramo fue el audio: la boca se movía pero no se oía nada. La señal era correcta en el origen (−15 dBFS y stream activo) y silencio en **todos** los buses de Voicemeeter, por los tres backends. Antes de seguir depurando el enrutado se probó el camino corto —reproducir directo en los auriculares— y sonó a la primera. Voicemeeter se tragaba el audio y, como el lip sync ya no lo necesitaba, se eliminó del camino. Menos piezas, menos latencia.
 
 ---
 

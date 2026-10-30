@@ -64,9 +64,7 @@ LLMProvider (por defecto OllamaAdapter → /api/chat)
 respuesta
         ↓
 core/lipsync.py  (sintetiza, calcula la boca y reproduce)
-        ├── core/tts.py → MP3 → Voicemeeter Input
-        │                             ↓
-        │                 Strip 3 (VAIO) → A1 auriculares
+        ├── core/tts.py → MP3 → endpoint de salida de Windows (auriculares DGM20)
         └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
 
@@ -75,7 +73,7 @@ core/lipsync.py  (sintetiza, calcula la boca y reproduce)
 - ✅ Cerebro desacoplado del proveedor mediante `LLMProvider`.
 - ✅ Backend local con Ollama (`qwen2.5:7b-instruct-q4_k_m` por defecto).
 - ✅ Memoria manual con ventana deslizante.
-- ✅ Voz con Edge-TTS reproducida en `Voicemeeter Input` (Strip 3, Virtual VAIO), que llega a A1 (auriculares).
+- ✅ Voz con Edge-TTS reproducida directamente en el dispositivo de salida de Windows (auriculares DGM20 por DirectSound). La variable `NIU_SALIDA` permite forzar otro destino sin tocar código.
 - ✅ Lip sync controlado por Niu: la boca se mueve con la envolvente de su propio audio, sin depender del micrófono de VTS. Verificado: 298/298 frames en 7,45 s para 7,46 s de audio, `ParamMouthOpenY` de 0 a 2,30.
 - ✅ Parámetro propio `NiuMouthOpen` creado por API; el modelo puede mapearlo a `ParamMouthOpenY`. Mientras no exista ese mapeo, se usa `VoiceVolumePlusMouthOpen` como respaldo y funciona igual.
 - ✅ Conexión persistente con VTube Studio.
@@ -138,8 +136,9 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 | Hecho | Desacoplar proveedor LLM (`LLMProvider`) | Permitir Gemini, Ollama y futuros proveedores sin reescribir el cerebro |
 | Hecho | Ollama como backend por defecto | Sin cuotas, latencia local y control del modelo |
 | Hecho | Entrada de audio con `sounddevice` | PyAudio no tiene wheel para Python 3.14 |
-| Hecho | Salida TTS en `Voicemeeter Input` (Strip 3, VAIO) | `Voicemeeter In 1` no alimenta ninguna tira: el audio entraba y se descartaba |
-| Hecho | Salida por DirectSound (no WASAPI) | WASAPI falla al abrir el stream desde un hilo secundario |
+| Hecho | Salida TTS en el dispositivo por defecto de Windows | El audio va donde va el sistema, sin nombres de dispositivo clavados en el código |
+| Hecho | Quitar Voicemeeter del camino de la voz | Ya no hace falta para el lip sync (lo mueve Niu) y era un eslabón que podía fallar en silencio; además añadía latencia |
+| Hecho | Salida por DirectSound (no WASAPI) | WASAPI falla al abrir el stream desde un hilo secundario, y exige que la frecuencia coincida exactamente con la del endpoint |
 | Hecho | `STTProvider` con `whisper` y `gemini` | Mismo patrón que `LLMProvider`: cambiar de motor sin tocar captura ni `main.py` |
 | Hecho | Whisper local como motor por defecto | Sin cuotas, sin internet y sin enviar la voz a terceros |
 | Hecho | Capturar con los canales nativos del micro y elegir canal en Python | Pedir `channels=1` a un dispositivo estéreo corrompe el audio en WASAPI |
@@ -167,9 +166,8 @@ GOOGLE_API_KEY=tu_api_key
 
 ## 🧪 Problema actual
 
-El backend local ya está integrado y responde, el oído funciona de extremo a extremo y la boca se mueve con la voz. Los puntos débiles conocidos ahora son:
+El backend local ya está integrado y responde, el oído funciona de extremo a extremo, la boca se mueve con la voz y el audio sale por los auriculares. Los puntos débiles conocidos ahora son:
 
-- El parámetro propio `NiuMouthOpen` todavía no está mapeado en el modelo: se usa el respaldo `VoiceVolumePlusMouthOpen`, que VTS también escribe desde su micrófono.
 - Las expresiones emocionales usan hotkeys (`MouthSmile`, `MouthFrown`...) que no existen en el modelo cargado.
 - El TTS bloquea el bucle mientras habla (no hay barge-in).
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
@@ -232,6 +230,41 @@ Resultado medido: `298/298` frames en 7,45 s para 7,46 s de audio, con `ParamMou
 | 23,3 ms | 31,2 ms | +7,9 ms |
 
 Con ese error, el bucle se quedaba un 4–5 % atrás y la boca terminaba la frase con retraso creciente, aunque el reloj fuera absoluto. Se arregla con `timeBeginPeriod(1)` mientras dura la animación (`_TemporizadorPreciso`), que baja el error a ~1 ms, y restando 2 ms de margen para que no se acumule. Después del arreglo, 20, 25, 30, 35 y 40 Hz cumplen con un 0,1 % de error.
+
+### Caso resuelto: «se mueve la boca pero no se oye nada»
+
+Síntoma: el lip sync medía `ParamMouthOpenY` de 0 a 2,29 sin problema, y los logs decían `[TTS] Reproducción completada`, pero no salía sonido.
+
+Lo primero fue comprobar el otro extremo de la cadena, no el código: se reprodujo un tono en `Voicemeeter Input` y se grabó cada bus por separado.
+
+| comprobación | resultado |
+|---|---|
+| RMS de lo que se manda a `sd.play` | −15,1 dBFS ✅ (la señal es real) |
+| estado del stream de salida | `activo=True` ✅ |
+| bus A1 (auriculares) | −240 dBFS ❌ |
+| bus B1 (virtual) | −240 dBFS ❌ |
+| mismos buses por MME, DirectSound y WASAPI | silencio en los tres ❌ |
+
+Que **los tres backends** coincidan descarta el host API. Una captura de pantalla del mezclador lo cerró: A1 estaba correctamente asignado a los auriculares DGM20, la tira 3 tenía A1 activado, y aun así **ningún medidor se movía**, ni el de la tira ni el del máster. El audio no llegaba ni a entrar.
+
+La prueba decisiva fue quitar el eslabón: el mismo tono y la misma frase, reproducidos **directo en los auriculares**, se oyeron a la primera. Voicemeeter era el que estaba tragándose el audio; el código, los auriculares y el archivo estaban bien.
+
+Decisión: **quitar Voicemeeter del camino de la voz**. Con el lip sync en manos de Niu, el cable virtual ya no servía para nada: era una pieza más que podía fallar en silencio, y añadía latencia.
+
+| pieza | antes | ahora |
+|---|---|---|
+| destino | `Voicemeeter Input` → VAIO → A1 | endpoint de salida de Windows |
+| selección | nombre fijo en el código | `buscar_salida_por_defecto()` + `NIU_SALIDA` para forzar |
+| canales | la voz repetida en los 8 canales del endpoint | voz en los 2 primeros, silencio en el resto |
+
+De paso apareció un dato útil: al reproducir el MP3 a 24 kHz en un endpoint de 48 kHz, PortAudio responde `Invalid sample rate [PaErrorCode -9997]`. Eso confirma que el remuestreo de `preparar_audio` no es decoración: sin él, el archivo no se puede ni abrir.
+
+Lecciones:
+
+1. **Medir en el destino, no en la salida.** `sd.play` sin excepción solo prueba que se pidió reproducir, no que algo sonara.
+2. **Cuando todos los caminos fallan igual, sospecha de la pieza común**, no de cada camino por separado.
+3. **Antes de arreglar una pieza, pregunta si sigue haciendo falta.** Eliminar Voicemeeter resolvió el problema y mejoró la latencia sin añadir una sola línea de código.
+
 
 ### Caso resuelto: «el micrófono no entendía»
 
@@ -298,6 +331,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Niveles en dBFS**: medir en absoluto (contra el fondo de escala) y no solo normalizando por archivo, porque normalizar oculta si lo que hay es señal o ruido amplificado.
 - **Contexto del decoder (`initial_prompt`)**: Whisper elige palabras por contexto; sin él, un nombre propio como «Niu» se convierte en «New».
 - **Medir en el otro extremo de la cadena**: que una función de reproducción termine correctamente no prueba que el audio llegue; hay que grabarlo donde se supone que suena.
+- **Sospechar de la pieza común**: si todos los backends fallan igual, el fallo no está en cada backend sino en lo que comparten.
+- **Preguntar si una pieza sigue haciendo falta antes de arreglarla**: Voicemeeter existía para el lip sync de VTS; al mover el lip sync a Niu, mantenerlo solo añadía latencia y puntos de fallo.
 - **Los parámetros Live2D no se pueden escribir por la API**: `InjectParameterDataRequest` solo acepta parámetros de *tracking* (`VoiceVolume`, y los que crea un plugin). Pedir `ParamMouthOpenY` devuelve el error 453.
 - **Un parámetro de tracking propio es la vía limpia**: `ParameterCreationRequest` crea un parámetro que solo escribe tu plugin y que el modelo puede usar como entrada de cualquier parámetro Live2D.
 - **Medir en vez de suponer**: para saber si un mapeo existe, se inyecta 0 y 1 y se mira si la boca se mueve. Leer el archivo de configuración habría dado falsos negativos.
@@ -330,7 +365,6 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
-- `NiuMouthOpen` funciona por el respaldo `VoiceVolumePlusMouthOpen` hasta que se mapee en el modelo; ese respaldo compite con el lip sync de VTS si su micrófono está activo.
 - `ParamMouthForm` se queda fijo en 1.0 (sonrisa): el mapeo `MouthSmile` existe pero nada le envía datos.
 - Las expresiones llaman a hotkeys que no existen en el modelo (`MouthSmile`, `MouthFrown`...): fallan sin avisar y no hay alternativa definida.
 
