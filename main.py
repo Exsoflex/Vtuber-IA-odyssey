@@ -22,7 +22,7 @@ from core.stt import (
     crear_proveedor_stt,
     grabar_hasta_silencio,
 )
-from core.tts import sintetizar_y_reproducir_voz_async
+from core.lipsync import hablar_con_lipsync
 from core.vts_client import vts_client
 
 # ─── UTF-8 y salida sin buffering en consola Windows ───────────────────────
@@ -39,19 +39,20 @@ IDIOMA_STT = os.getenv("NIU_STT_IDIOMA", "").strip().lower() or None
 
 
 async def hablar_con_niu(texto_usuario: str, brain: NiuBrain):
-    """Flujo completo: Cerebro -> texto -> TTS -> audio."""
+    """Flujo completo: Cerebro -> texto -> TTS con lip sync -> audio."""
     respuesta_niu = await brain.procesar_mensaje("Rotceh", texto_usuario)
     print(f"\nNiu: {respuesta_niu}")
 
     archivo_audio = os.path.abspath("dia_por_dia/voz_temp.mp3")
     os.makedirs(os.path.dirname(archivo_audio), exist_ok=True)
 
-    exito_tts = await sintetizar_y_reproducir_voz_async(respuesta_niu, archivo_audio)
+    # Sintetiza, reproduce y mueve la boca. La boca la calcula Niu a partir de
+    # su propio audio: no depende del micrófono de VTube Studio.
+    exito_tts = await hablar_con_lipsync(respuesta_niu, archivo_audio)
     if not exito_tts:
         print("❌ [Error] No se pudo generar el audio de Niu")
         return
 
-    # VTube Studio hace el lip sync solo, escuchando el dispositivo virtual.
     respuesta_lower = respuesta_niu.lower()
     if any(p in respuesta_lower for p in ["feliz", "alegre", "contenta", ":)", ":-)"]):
         await vts_client.trigger_expression("MouthSmile")

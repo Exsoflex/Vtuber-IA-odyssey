@@ -94,16 +94,25 @@ Del oído pasamos a la boca: que Niu se oiga y que el avatar la acompañe.
 | Verificación objetiva | Tono y frase reales medidos en el bus B1 (−34 dBFS, 3,8 s de señal) | ✅ |
 | Reconexión con VTS | Reintentos (5 × 2 s) en vez de rendirse ante `WinError 1225` | ✅ |
 | Limpieza de `vts_client.py` | Métodos definidos 4 veces; se conserva solo la versión viva (504 → 233 líneas) | ✅ |
-| Prueba del lip sync | `probar_lipsync.py`: mide `VoiceVolume` y `ParamMouthOpenY` por la API | ✅ |
-| Captura de VTS | El micro de VTS muere con `Failed to initialize (timeout)`; requiere reiniciar VTS | ⚠️ abierto |
+| Transporte de VTS | Un solo punto de salida (`peticion()`) con lock: dos corrutinas no pueden cruzarse respuestas | ✅ |
+| Envolvente del audio | Audio → RMS por ventana → dBFS → 0..1 con ataque rápido y liberación lenta | ✅ |
+| Inyección sincronizada | Reloj absoluto a 40 Hz; `timeBeginPeriod(1)` porque `asyncio.sleep` se desvía 15,6 ms | ✅ |
+| Parámetro propio | `NiuMouthOpen` creado por API; respaldo automático a `VoiceVolumePlusMouthOpen` | ✅ |
+| Prueba del lip sync | `probar_lipsync.py`: mide `ParamMouthOpenY` por la API mientras Niu habla | ✅ |
+| Tests de la envolvente | 16 tests en `tests/test_envolvente.py` (pytest) | ✅ |
+| Mapeo en el modelo | Falta asignar `NiuMouthOpen` a `Mouth Open` en VTS (paso manual, una vez) | ⚠️ pendiente |
 | Expresiones | Los hotkeys `MouthSmile`/`MouthFrown`/`MouthAngry`/`MouthOpen` no existen en el modelo | ⚠️ pendiente |
 
 ### Criterio de éxito
 
 ```text
 voz de Niu → Voicemeeter (strip VAIO) → A1 auriculares   (se oye)
-                                     → B1 VTube Studio   (mueve la boca)
+                                     → (nada: el lip sync ya no depende de este bus)
+
+audio de Niu → envolvente 0..1 (40 Hz) → API de VTS → NiuMouthOpen → ParamMouthOpenY
 ```
+
+Medido: 298/298 frames en 7,45 s para 7,46 s de audio, con `ParamMouthOpenY` de 0 a 2,30.
 
 ### Pregunta guía del hito
 
@@ -113,6 +122,12 @@ voz de Niu → Voicemeeter (strip VAIO) → A1 auriculares   (se oye)
 La respuesta está en el otro extremo de la cadena: grabar el bus donde debería
 sonar y medir. Un "sin errores" en el origen no prueba nada en el destino.
 ```
+
+### Lo que costó encontrarlo
+
+El primer intento fue dejar que VTS escuchara el bus B1. Falló porque Unity cachea los dispositivos de audio al arrancar y no se recupera si Voicemeeter se reinicia después (`Failed to initialize microphone (timeout)`, y más tarde `Activating microphone: ""` con la lista vacía). En vez de pelear con Unity, se eliminó la dependencia: Niu calcula la boca de su propio audio.
+
+Y el desfase final no era de VTS ni de la red: `asyncio.sleep` en Windows se despierta en múltiplos de 15,6 ms. Un bucle de 40 Hz pedía 25 ms y recibía 31,2. Lección: cuando un bucle "en tiempo real" se retrasa sistemáticamente, hay que medir el reloj antes de culpar a la red.
 
 ---
 

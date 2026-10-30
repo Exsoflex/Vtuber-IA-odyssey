@@ -1,21 +1,32 @@
 """
 Cliente de VTube Studio: conexión WebSocket, autenticación y envío de datos.
 
-Qué hace y qué NO hace:
+Qué hace:
 
 - Conecta con la API pública de VTS (`ws://localhost:8001`) y se autentica con
   un token persistente en `vts_token.txt` (el usuario solo autoriza una vez).
+- Crea parámetros de tracking propios ("custom parameters") con
+  `ParameterCreationRequest`.
+- Inyecta valores en esos parámetros con `InjectParameterDataRequest`.
 - Dispara hotkeys (expresiones, animaciones) con `trigger_expression`.
 
-- NO empuja la boca del avatar. El lip sync lo hace VTube Studio por su cuenta:
-  escucha un dispositivo de audio (aquí `Voicemeeter Out B1`) y mueve los
-  parámetros de boca según el volumen. La API no permite escribir parámetros
-  Live2D como `ParamMouthOpenY`; solo parámetros de tracking propios.
+Qué NO hace:
+
+- NO puede escribir parámetros Live2D como `ParamMouthOpenY`: VTS responde con
+  el error 453. Solo acepta parámetros de tracking (los que crea un plugin).
+
+Sobre la concurrencia:
+
+    Un WebSocket no etiqueta las respuestas. Si dos corrutinas mandan una
+    petición cada una, la primera puede recibir la respuesta de la segunda.
+    Por eso TODAS las peticiones pasan por `peticion()`, que las serializa con
+    un `asyncio.Lock`.
 """
 
 import asyncio
 import json
 import os
+
 import websockets
 
 TOKEN_FILE = "vts_token.txt"
@@ -26,6 +37,8 @@ class VTSClient:
         self.websocket = None
         self.connected = False
         self.uri = "ws://localhost:8001"
+        self._lock = asyncio.Lock()
+        self._id = 0
 
     # ─── Conexión ──────────────────────────────────────────────────────────
 
@@ -98,12 +111,11 @@ class VTSClient:
                 "messageType": "AuthenticationTokenRequest",
                 "data": {
                     "pluginName": "NiuAutonomousEngine",
-                    "pluginDeveloper": "Rotceh"
-                }
+                    "pluginDeveloper": "Rotceh",
+                },
             }
             await self.websocket.send(json.dumps(token_payload))
-            response_raw = await self.websocket.recv()
-            response = json.loads(response_raw)
+            response = json.loads(await self.websocket.recv())
 
             if "data" in response and "authenticationToken" in response["data"]:
                 token = response["data"]["authenticationToken"]
@@ -123,21 +135,20 @@ class VTSClient:
             "data": {
                 "pluginName": "NiuAutonomousEngine",
                 "pluginDeveloper": "Rotceh",
-                "authenticationToken": token
-            }
+                "authenticationToken": token,
+            },
         }
 
         print("[VTS] Autenticando sesion...")
         await self.websocket.send(json.dumps(auth_payload))
-        auth_response_raw = await self.websocket.recv()
-        auth_response = json.loads(auth_response_raw)
+        auth_response = json.loads(await self.websocket.recv())
 
         if auth_response.get("data", {}).get("authenticated", False):
             print("[VTS] Autenticacion con VTube Studio exitosa!")
         else:
             print(f"[ERROR] [VTS Error de Autenticacion]: {auth_response}")
 
-    async def _ensure_connected(self):
+    async def _ensure_connected(self) -> bool:
         """Reconecta si el socket se cayó. Devuelve False si no lo consigue."""
         if not self.connected or not self.websocket:
             print("[VTS] Conexión perdida, reconectando...")
@@ -152,48 +163,128 @@ class VTSClient:
             self.connected = False
             self.websocket = None
 
-    # ─── Datos hacia el modelo ─────────────────────────────────────────────
+    # ─── Transporte ────────────────────────────────────────────────────────
+
+    async def peticion(self, message_type: str, data: dict | None = None,
+                       timeout: float = 2.0) -> dict | None:
+        """Envía una petición y devuelve la respuesta decodificada.
+
+        Es el único punto por el que salen mensajes, y está serializado con un
+        lock: mientras una corrutina espera su respuesta, ninguna otra puede
+        adelantarse y quedarse con ella.
+
+        Returns:
+            El dict de respuesta, o None si no hay conexión o hubo un error de
+            red. Los `APIError` (petición mal formada, parámetro inexistente...)
+            sí se devuelven: son respuestas válidas de VTS.
+        """
+        async with self._lock:
+            if not await self._ensure_connected():
+                return None
+
+            self._id += 1
+            payload = {
+                "apiName": "VTubeStudioPublicAPI",
+                "apiVersion": "1.0",
+                "requestID": f"Niu_{self._id}",
+                "messageType": message_type,
+            }
+            if data is not None:
+                payload["data"] = data
+
+            try:
+                await self.websocket.send(json.dumps(payload))
+                respuesta = json.loads(
+                    await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
+                )
+            except asyncio.TimeoutError:
+                print(f"[WARN] [VTS] Timeout en {message_type}")
+                return None
+            except Exception as e:
+                print(f"[ERROR] [VTS] {message_type}: {type(e).__name__}: {e}")
+                self.connected = False
+                return None
+
+        if respuesta.get("messageType") == "APIError":
+            print(f"[WARN] [VTS] {message_type}: "
+                  f"{respuesta.get('data', {}).get('message')}")
+        return respuesta
+
+    # ─── Parámetros de tracking ────────────────────────────────────────────
+
+    async def crear_parametro_tracking(self, nombre: str,
+                                       explicacion: str = "",
+                                       minimo: float = 0.0,
+                                       maximo: float = 1.0,
+                                       defecto: float = 0.0) -> bool:
+        """Crea un parámetro de tracking propio (idempotente).
+
+        VTS exige que el nombre sea alfanumérico (sin espacios) y de 4 a 32
+        caracteres. Si el parámetro ya existe y lo creó este mismo plugin, la
+        petición vuelve a tener éxito y solo actualiza min/max/defecto: se puede
+        llamar en cada arranque sin miedo.
+
+        Después de crearlo, el usuario tiene que asignarlo a un parámetro Live2D
+        en VTS (Configuración del modelo). Eso se hace una vez y queda guardado
+        en el modelo.
+        """
+        if not nombre.isalnum() or not 4 <= len(nombre) <= 32:
+            print(f"[ERROR] [VTS] Nombre de parámetro inválido: {nombre!r} "
+                  f"(alfanumérico, 4-32 caracteres)")
+            return False
+
+        respuesta = await self.peticion("ParameterCreationRequest", {
+            "parameterName": nombre,
+            "explanation": explicacion,
+            "min": minimo,
+            "max": maximo,
+            "defaultValue": defecto,
+        })
+        return bool(respuesta
+                    and respuesta.get("messageType") == "ParameterCreationResponse")
+
+    async def inyectar_parametro(self, nombre: str, valor: float,
+                                 peso: float | None = None) -> bool:
+        """Envía un valor a un parámetro de tracking.
+
+        VTS considera el parámetro "perdido" si no recibe un valor al menos una
+        vez por segundo; al perderse vuelve a su valor por defecto.
+
+        Args:
+            nombre: parámetro de tracking (por ejemplo `NiuMouthOpen`).
+            valor: valor a enviar (entre -1e6 y 1e6).
+            peso: 0-1 para mezclar con el tracking de la cara. None = control
+                total (peso 1).
+        """
+        datos: dict = {
+            "faceFound": True,
+            "mode": "set",
+            "parameterValues": [{"id": nombre, "value": float(valor)}],
+        }
+        if peso is not None:
+            datos["parameterValues"][0]["weight"] = float(peso)
+
+        respuesta = await self.peticion("InjectParameterDataRequest", datos)
+        return bool(respuesta
+                    and respuesta.get("messageType") == "InjectParameterDataResponse")
+
+    async def leer_parametro(self, nombre: str) -> float | None:
+        """Lee el valor actual de un parámetro de tracking.
+
+        No sirve para parámetros Live2D (`ParamMouthOpenY`): para esos hay que
+        usar `Live2DParameterListRequest`.
+        """
+        respuesta = await self.peticion("ParameterValueRequest", {"name": nombre})
+        if not respuesta or respuesta.get("messageType") != "ParameterValueResponse":
+            return None
+        return float(respuesta["data"].get("value", 0.0))
+
+    # ─── Compatibilidad ────────────────────────────────────────────────────
 
     async def send_parameter(self, parameter_name: str, value: float,
-                             weight: float = 1.0):
-        """Inyecta un valor en un parámetro de tracking.
-
-        Ojo: solo funciona con parámetros de tracking (los que crea un plugin
-        con `ParameterCreationRequest`). Los parámetros Live2D del modelo, como
-        `ParamMouthOpenY`, NO se pueden escribir por la API: VTS responde con
-        el error 453. La boca se mueve con el lip sync propio de VTS.
-        """
-        if not await self._ensure_connected():
-            return
-
-        value = max(0.0, min(1.0, value))
-        payload = {
-            "apiName": "VTubeStudioPublicAPI",
-            "apiVersion": "1.0",
-            "requestID": f"ParamInject_{parameter_name}",
-            "messageType": "InjectParameterDataRequest",
-            "data": {
-                "parameterValues": [
-                    {
-                        "name": parameter_name,
-                        "value": value,
-                        "weight": weight
-                    }
-                ]
-            }
-        }
-        try:
-            await self.websocket.send(json.dumps(payload))
-            response_raw = await asyncio.wait_for(self.websocket.recv(), timeout=2)
-            response = json.loads(response_raw)
-            if response.get("messageType") == "APIError":
-                print(f"[WARN] [VTS] {parameter_name}: "
-                      f"{response.get('data', {}).get('message')}")
-        except asyncio.TimeoutError:
-            print(f"[WARN] [VTS] Timeout esperando respuesta para {parameter_name}")
-        except Exception as e:
-            print(f"[ERROR] [VTS Error enviando parámetro]: {e}")
-            self.connected = False
+                             weight: float = 1.0) -> bool:
+        """Alias de `inyectar_parametro` con peso obligatorio."""
+        return await self.inyectar_parametro(parameter_name, value, peso=weight)
 
     async def trigger_expression(self, expression_file: str):
         """Dispara un hotkey del modelo por su nombre o por su ID.
@@ -201,33 +292,13 @@ class VTSClient:
         `expression_file` es un nombre de hotkey de VTS, no un archivo: los
         nombres válidos son los que aparecen en la lista de hotkeys del modelo.
         """
-        if not await self._ensure_connected():
+        respuesta = await self.peticion("TriggerHotkeyRequest",
+                                        {"hotkeyID": expression_file})
+        if not respuesta:
             return
-
-        payload = {
-            "apiName": "VTubeStudioPublicAPI",
-            "apiVersion": "1.0",
-            "requestID": f"Expression_{expression_file}",
-            "messageType": "TriggerHotkeyRequest",
-            "data": {
-                "hotkeyID": expression_file
-            }
-        }
-        try:
-            await self.websocket.send(json.dumps(payload))
-            # Hay que leer la respuesta SIEMPRE. Si no se lee, queda en el
-            # buffer y la siguiente petición recibe la respuesta anterior.
-            response_raw = await asyncio.wait_for(self.websocket.recv(), timeout=2)
-            response = json.loads(response_raw)
-            if response.get("messageType") == "APIError":
-                print(f"[WARN] [VTS] Hotkey {expression_file!r}: "
-                      f"{response.get('data', {}).get('message')}")
-        except asyncio.TimeoutError:
-            print(f"[WARN] [VTS] Timeout esperando respuesta del hotkey "
-                  f"{expression_file!r}")
-        except Exception as e:
-            print(f"[ERROR] [VTS Error disparando expresión]: {e}")
-            self.connected = False
+        if respuesta.get("messageType") == "APIError":
+            print(f"[WARN] [VTS] Hotkey {expression_file!r}: "
+                  f"{respuesta.get('data', {}).get('message')}")
 
 
 vts_client = VTSClient()

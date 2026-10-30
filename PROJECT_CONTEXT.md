@@ -34,10 +34,13 @@ Vtuber IA odyssey/
 │   ├── stt_whisper.py      # Adaptador local: faster-whisper (GPU/CPU)
 │   ├── stt_gemini.py       # Adaptador nube: Gemini (audio → texto)
 │   ├── tts.py             # Voz: Edge-TTS → MP3 → dispositivo virtual
+│   ├── lipsync.py         # Boca: audio → envolvente → parámetro de VTS
 │   ├── audio_devices.py   # Búsqueda de dispositivos por nombre y host API
 │   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
 ├── main.py                # Orquestador: entrada + LLM + TTS + VTS + CLI
 ├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
+├── probar_lipsync.py      # Prueba de extremo a extremo de la boca
+├── tests/                 # pytest: lógica que puede romperse en silencio
 ├── requirements.txt
 ├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
 ├── vts_token.txt          # Token VTS persistente (no versionado)
@@ -59,10 +62,12 @@ core/brain.py
 LLMProvider (por defecto OllamaAdapter → /api/chat)
         ↓
 respuesta
-        └──────────────→ core/tts.py → MP3 → Voicemeeter Input
-                                              ↓
-                              Strip 3 (Virtual VAIO) → A1 auriculares
-                                                    └→ B1 → VTube Studio (lip sync)
+        ↓
+core/lipsync.py  (sintetiza, calcula la boca y reproduce)
+        ├── core/tts.py → MP3 → Voicemeeter Input
+        │                             ↓
+        │                 Strip 3 (VAIO) → A1 auriculares
+        └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
 
 ### Estado funcional documentado
@@ -70,7 +75,9 @@ respuesta
 - ✅ Cerebro desacoplado del proveedor mediante `LLMProvider`.
 - ✅ Backend local con Ollama (`qwen2.5:7b-instruct-q4_k_m` por defecto).
 - ✅ Memoria manual con ventana deslizante.
-- ✅ Voz con Edge-TTS reproducida en `Voicemeeter Input` (Strip 3, Virtual VAIO), que llega a A1 (auriculares) y a B1 (lip sync).
+- ✅ Voz con Edge-TTS reproducida en `Voicemeeter Input` (Strip 3, Virtual VAIO), que llega a A1 (auriculares).
+- ✅ Lip sync controlado por Niu: la boca se mueve con la envolvente de su propio audio, sin depender del micrófono de VTS. Verificado: 298/298 frames en 7,45 s para 7,46 s de audio, `ParamMouthOpenY` de 0 a 2,30.
+- ✅ Parámetro propio `NiuMouthOpen` creado por API; el modelo puede mapearlo a `ParamMouthOpenY`. Mientras no exista ese mapeo, se usa `VoiceVolumePlusMouthOpen` como respaldo y funciona igual.
 - ✅ Conexión persistente con VTube Studio.
 - ✅ Entrada de voz con `sounddevice` (sin PyAudio) y detección de silencio por RMS.
 - ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
@@ -160,15 +167,15 @@ GOOGLE_API_KEY=tu_api_key
 
 ## 🧪 Problema actual
 
-El backend local ya está integrado y responde, y el oído funciona de extremo a extremo. Los puntos débiles conocidos ahora son:
+El backend local ya está integrado y responde, el oído funciona de extremo a extremo y la boca se mueve con la voz. Los puntos débiles conocidos ahora son:
 
-- El lip sync depende de la captura de micrófono de VTube Studio, que falla con dispositivos virtuales (ver caso más abajo).
+- El parámetro propio `NiuMouthOpen` todavía no está mapeado en el modelo: se usa el respaldo `VoiceVolumePlusMouthOpen`, que VTS también escribe desde su micrófono.
 - Las expresiones emocionales usan hotkeys (`MouthSmile`, `MouthFrown`...) que no existen en el modelo cargado.
 - El TTS bloquea el bucle mientras habla (no hay barge-in).
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
-- No hay tests automatizados del cerebro ni del adaptador.
+- Hay tests de la envolvente (`tests/`), pero no del cerebro ni del adaptador LLM.
 
-**Objetivo inmediato:** medir la latencia total (voz → respuesta → voz) y después añadir tests y logging.
+**Objetivo inmediato:** medir la latencia total (voz → respuesta → voz) y después añadir logging y tests del cerebro.
 
 ### Caso resuelto: «Niu responde pero no se la oye»
 
@@ -184,9 +191,9 @@ Causa real: `core/tts.py` reproducía en `Voicemeeter In 1`, y en este driver es
 
 `Voicemeeter Input` cae en el Strip 3 (Virtual VAIO), que está ruteado a A1 (auriculares) y B1 (VTube Studio). Lección: que una función de reproducción «termine sin error» no significa que el audio haya llegado a su destino; hay que medirlo en el otro extremo de la cadena.
 
-### Caso abierto: «el avatar no mueve la boca»
+### Caso resuelto: «el avatar no mueve la boca» → ahora la mueve Niu
 
-El lip sync de VTS no lo hace Niu: lo hace VTube Studio escuchando `Voicemeeter Out B1`. Comprobado con la API y con el log de VTS:
+La primera vía fue dejar que VTube Studio escuchara `Voicemeeter Out B1`. Falló por dos motivos distintos:
 
 | comprobación | resultado |
 |---|---|
@@ -194,8 +201,37 @@ El lip sync de VTS no lo hace Niu: lo hace VTube Studio escuchando `Voicemeeter 
 | mapeo del modelo | `VoiceVolumePlusMouthOpen` → `ParamMouthOpenY` ✅ |
 | tipo de lip sync | `OcculusVRLipsync` (Simple, legacy) → cambiado a `ULipSync` |
 | captura real | `Failed to initialize microphone (timeout). Deactivating microphone.` ❌ |
+| tras reiniciar VTS | `Activating microphone: ""` — Unity no veía **ningún** dispositivo ❌ |
 
-El motor de lip sync funciona (`VoiceSilence` responde), pero la captura de micrófono de Unity no abre el dispositivo virtual después del primer cierre y VTS desactiva el micro por su cuenta. El dispositivo está sano: `sounddevice` lo abre a 48 kHz sin problema. La prueba objetiva está en `probar_lipsync.py` (mide `VoiceVolume` y `ParamMouthOpenY` por la API, sin depender de mirar la pantalla).
+El dispositivo estaba sano: `sounddevice` lo abría a 48 kHz sin problema, Windows veía 62 entradas y los servicios de audio corrían. El fallo era de Unity, que cachea la lista de dispositivos al arrancar y no se recupera cuando Voicemeeter se reinicia después.
+
+La solución no fue arreglar Unity, sino **quitar la dependencia**: Niu ya conoce su audio antes de reproducirlo, así que calcula ella la apertura de boca y la inyecta por la API.
+
+| pieza | decisión |
+|---|---|
+| cálculo | RMS por ventana de 25 ms → dBFS → normalizado entre −45 y −16 dB |
+| suavizado | ataque 0,65 / liberación 0,30 (abre rápido, cierra despacio) |
+| envío | 40 valores/s por `InjectParameterDataRequest` |
+| parámetro | `NiuMouthOpen` (propio) con respaldo a `VoiceVolumePlusMouthOpen` |
+| verificación | `probar_lipsync.py` mide `ParamMouthOpenY` por la API |
+
+Resultado medido: `298/298` frames en 7,45 s para 7,46 s de audio, con `ParamMouthOpenY` recorriendo 0 → 2,30 y 14 aperturas en una frase.
+
+#### Tres cosas que costaron encontrar
+
+**1. Los parámetros de tracking sí se pueden inyectar; los Live2D no.** El error 453 no era «la API no deja inyectar», era «`ParamMouthOpenY` es un parámetro Live2D». `VoiceVolumePlusMouthOpen` y `VoiceVolume` aceptan inyección sin problema. Eso permitió que funcionara sin tocar la configuración de VTS.
+
+**2. VTS no contesta al recibir: contesta en su siguiente frame de render.** Cada petición cuesta 16,7 ms fijos (1/60 s), sea cual sea el mensaje. Con 40 envíos por segundo eso deja 8 ms de margen por frame.
+
+**3. `asyncio.sleep` en Windows se despierta en múltiplos de 15,6 ms.** Medido en este equipo:
+
+| pedido | real | error |
+|---|---|---|
+| 5,0 ms | 15,6 ms | +10,6 ms |
+| 16,6 ms | 31,2 ms | +14,6 ms |
+| 23,3 ms | 31,2 ms | +7,9 ms |
+
+Con ese error, el bucle se quedaba un 4–5 % atrás y la boca terminaba la frase con retraso creciente, aunque el reloj fuera absoluto. Se arregla con `timeBeginPeriod(1)` mientras dura la animación (`_TemporizadorPreciso`), que baja el error a ~1 ms, y restando 2 ms de margen para que no se acumule. Después del arreglo, 20, 25, 30, 35 y 40 Hz cumplen con un 0,1 % de error.
 
 ### Caso resuelto: «el micrófono no entendía»
 
@@ -241,14 +277,18 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Integración entre varios servicios.
 - Depuración de audio digital (frecuencia de muestreo, canales, espectro, niveles en dBFS).
 - Comprobar hipótesis con experimentos controlados en vez de cambiar cosas a ciegas.
+- Distinguir «el servicio no puede» de «el cliente lo usa mal» (el caso de la inyección de parámetros).
+- Medir un bucle de tiempo real y ajustar la tasa a lo que el sistema sostiene de verdad.
+- Escribir tests para funciones puras (`tests/test_envolvente.py`).
 
 ### Prioridad de aprendizaje actual
 
 1. Comprender la arquitectura existente antes de modificarla.
-2. Entender el flujo completo de punta a punta: voz → STT → cerebro → TTS → VTS.
+2. Entender el flujo completo de punta a punta: voz → STT → cerebro → TTS → envolvente → VTS.
 3. Saber medir latencia y localizar dónde se va el tiempo.
 4. Escribir tests para la lógica crítica (VAD, remuestreo, cerebro).
 5. Ganar autonomía depurando audio y concurrencia sin depender del tutor.
+6. Saber explicar cuándo una solución acoplada (VTS escuchando el bus) es peor que una explícita (Niu calculando su boca) aunque cueste una hora más.
 
 ### Conceptos aprendidos dentro del proyecto
 
@@ -258,8 +298,15 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Niveles en dBFS**: medir en absoluto (contra el fondo de escala) y no solo normalizando por archivo, porque normalizar oculta si lo que hay es señal o ruido amplificado.
 - **Contexto del decoder (`initial_prompt`)**: Whisper elige palabras por contexto; sin él, un nombre propio como «Niu» se convierte en «New».
 - **Medir en el otro extremo de la cadena**: que una función de reproducción termine correctamente no prueba que el audio llegue; hay que grabarlo donde se supone que suena.
-- **Los parámetros Live2D no se pueden escribir por la API**: `InjectParameterDataRequest` solo acepta parámetros de tracking; el lip sync lo hace VTS con su propio micrófono.
+- **Los parámetros Live2D no se pueden escribir por la API**: `InjectParameterDataRequest` solo acepta parámetros de *tracking* (`VoiceVolume`, y los que crea un plugin). Pedir `ParamMouthOpenY` devuelve el error 453.
+- **Un parámetro de tracking propio es la vía limpia**: `ParameterCreationRequest` crea un parámetro que solo escribe tu plugin y que el modelo puede usar como entrada de cualquier parámetro Live2D.
+- **Medir en vez de suponer**: para saber si un mapeo existe, se inyecta 0 y 1 y se mira si la boca se mueve. Leer el archivo de configuración habría dado falsos negativos.
+- **Un servicio puede contestar solo una vez por frame**: VTS responde en su siguiente frame de render, así que cada petición cuesta 16,7 ms aunque sea local. Eso fija el techo de peticiones por segundo.
+- **`asyncio.sleep` no tiene precisión de milisegundos en Windows**: se despierta en múltiplos de 15,6 ms. Un bucle que dependa de dormir "16 ms" se retrasa el doble. Se arregla con `timeBeginPeriod(1)` de WinMM, o midiendo y compensando.
+- **Reloj absoluto en vez de esperas relativas**: si cada frame se programa como `inicio + i/fps` en lugar de "dormir 25 ms", un retraso puntual no se convierte en desfase acumulado.
+- **Suavizado asimétrico**: abrir rápido y cerrar despacio es lo que diferencia una boca de un vúmetro.
 - **Definiciones duplicadas en Python**: si un método se define dos veces en la misma clase, la segunda sustituye a la primera sin avisar; el código anterior queda muerto y engaña al leerlo.
+- **Separar producir de usar**: `tts.py` genera y prepara el audio sin reproducirlo, para que el lip sync pueda analizarlo antes de que suene. Una función que "hace todo" no deja hueco para observar sus partes.
 
 ### Aún no asumir dominio completo de
 
@@ -277,13 +324,14 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Falta `GeminiAdapter` para volver a usar la nube.
 - Configuración pendiente de migrar a settings tipados.
 - Logging profesional pendiente.
-- Tests unitarios pendientes.
+- Tests unitarios pendientes del cerebro y del adaptador LLM (la envolvente del lip sync ya los tiene en `tests/`).
 - Interrupción de TTS pendiente.
 - Streaming de audio pendiente.
 - Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
-- El lip sync depende de la captura de micrófono de VTS, que se rompe con dispositivos virtuales y solo se recupera reiniciando VTS.
+- `NiuMouthOpen` funciona por el respaldo `VoiceVolumePlusMouthOpen` hasta que se mapee en el modelo; ese respaldo compite con el lip sync de VTS si su micrófono está activo.
+- `ParamMouthForm` se queda fijo en 1.0 (sonrisa): el mapeo `MouthSmile` existe pero nada le envía datos.
 - Las expresiones llaman a hotkeys que no existen en el modelo (`MouthSmile`, `MouthFrown`...): fallan sin avisar y no hay alternativa definida.
 
 ---

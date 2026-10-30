@@ -1,184 +1,171 @@
 """
-Prueba del lip sync de Niu: ¿VTube Studio oye su voz y mueve la boca?
+Prueba del lip sync de Niu: ¿se mueve la boca con su voz?
 
-Cómo funciona el lip sync (importante para entender qué se está midiendo):
+Cómo funciona ahora el lip sync (esto es lo que se está midiendo):
 
-    Niu reproduce su voz  →  Voicemeeter (strip VAIO)  →  bus B1
-                                                          ↓
-                              VTube Studio escucha B1, calcula el volumen
-                              y mueve ParamMouthOpenY (la boca)
+    Niu sintetiza su voz  →  calcula la envolvente (0..1 a 40 Hz)
+                                    ↓
+                        inyecta en VTS (NiuMouthOpen, o su respaldo)
+                                    ↓
+                        modelo:  entrada  →  ParamMouthOpenY
 
-Niu NO puede mover la boca por la API: la API pública no permite escribir
-parámetros Live2D, solo parámetros de tracking propios. Por eso este script
-solo comprueba, no empuja nada.
+Ya NO depende del micrófono de VTube Studio: Niu conoce su propio audio.
 
-Se hacen dos comprobaciones independientes:
+Dos fases, cada una aislando un eslabón:
 
-  1. ¿VTS OYE?          -> lee VoiceVolume y VoiceSilence mientras suena un tono.
-  2. ¿SE MUEVE LA BOCA? -> lee ParamMouthOpenY mientras Niu habla de verdad.
+    1. ¿Hay un parámetro que mueva la boca?  Se crea NiuMouthOpen y se prueba
+       de verdad: se inyecta 0 y 1 y se mira si ParamMouthOpenY cambia.
+    2. ¿Se mueve mientras habla?             Se dice una frase real y se
+       muestrea ParamMouthOpenY durante toda la reproducción.
 
-Así se distingue un problema de captura (VTS no oye) de un problema de mapeo
-(VTS oye pero el modelo no tiene la boca conectada).
+La fase 1 no mira archivos de configuración: mide el resultado. Es más fiable
+que suponer, porque VTS puede tener mapeos que el archivo no refleja.
 
 Uso:
     .venv\\Scripts\\python.exe probar_lipsync.py
 """
 
 import asyncio
-import json
 import sys
-import time
 
 import numpy as np
-import sounddevice as sd
 
-from core.tts import _buscar_dispositivo_salida, sintetizar_y_reproducir_voz_async
+from core.lipsync import (
+    FPS,
+    PARAMETRO_BOCA,
+    PARAMETRO_LIVE2D,
+    envolvente,
+    hablar_con_lipsync,
+    leer_apertura,
+    resolver_parametro,
+)
 from core.vts_client import vts_client
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-FS = 48000
-TRAMO = 0.8          # segundos de cada tramo del tono de prueba
-CICLOS = 2           # pares fuerte/silencio
 FRASE = "Uno, dos, tres, cuatro, cinco. La boca debería moverse con cada palabra."
-PARAMETROS_VOZ = ["VoiceVolume", "VoiceSilence"]
 
 
-async def pedir(message_type: str, data: dict | None = None) -> dict:
-    """Envía una petición a la API de VTS y devuelve la respuesta ya decodificada."""
-    payload = {
-        "apiName": "VTubeStudioPublicAPI",
-        "apiVersion": "1.0",
-        "requestID": f"{message_type}_{time.time_ns() % 100000}",
-        "messageType": message_type,
-    }
-    if data is not None:
-        payload["data"] = data
-    await vts_client.websocket.send(json.dumps(payload))
-    return json.loads(await vts_client.websocket.recv())
+# ─── Fase 0: la función pura, sin red ni audio ─────────────────────────
 
 
-async def leer_parametros(nombres: list[str]) -> dict[str, float]:
-    """Lee varios parámetros de tracking (VoiceVolume, etc.) de una vez."""
-    valores = {}
-    for nombre in nombres:
-        respuesta = await pedir("ParameterValueRequest", {"name": nombre})
-        if respuesta.get("messageType") == "ParameterValueResponse":
-            valores[nombre] = float(respuesta["data"]["value"])
-    return valores
+def probar_envolvente() -> bool:
+    """Comprueba `envolvente()` con un tono fabricado, sin tocar VTS.
+
+    Si esta parte falla, no tiene sentido mirar el avatar: el problema estaría
+    en el cálculo, no en la comunicación.
+    """
+    print("[0/2] Función de envolvente (audio sintético)")
+    fs = 48000
+    # 1 segundo de tono y 1 segundo de silencio
+    t = np.arange(fs) / fs
+    onda = np.concatenate([0.6 * np.sin(2 * np.pi * 220 * t), np.zeros(fs)])
+    boca = envolvente(onda.astype(np.float32), fs)
+
+    mitad = len(boca) // 2
+    con_tono = np.array(boca[:mitad])
+    # Del silencio se ignoran los primeros 0.4 s: la boca se cierra despacio
+    # a propósito (liberación), y medir el primer frame daría 0.7.
+    cola = np.array(boca[mitad + 16:])
+
+    print(f"      {len(boca)} frames para 2.0 s a {FPS} Hz")
+    print(f"      con tono          min={con_tono.min():.3f} max={con_tono.max():.3f}")
+    print(f"      silencio (cola)   min={cola.min():.3f} max={cola.max():.3f}")
+
+    ok = con_tono.max() > 0.9 and cola.max() < 0.02
+    print("      ✅ abre con el tono y cierra en silencio" if ok
+          else "      ❌ valores fuera de lo esperado")
+    return ok
 
 
-async def leer_live2d(nombres: list[str]) -> dict[str, float]:
-    """Lee parámetros Live2D del modelo (la lista completa trae los valores)."""
-    respuesta = await pedir("Live2DParameterListRequest")
-    if respuesta.get("messageType") != "Live2DParameterListResponse":
-        return {}
-    return {p["name"]: float(p["value"])
-            for p in respuesta["data"].get("parameters", [])
-            if p["name"] in nombres}
+# ─── Fase 1: hay un parámetro que mueve la boca ────────────────────────
 
 
-def tono_de_prueba() -> np.ndarray:
-    """Tono y silencio alternos: un volumen 'cuadrado' fácil de reconocer."""
-    t = np.arange(int(FS * TRAMO)) / FS
-    fuerte = 0.6 * np.sin(2 * np.pi * 220 * t)
-    silencio = np.zeros_like(fuerte)
-    return np.concatenate([fuerte, silencio] * CICLOS).astype(np.float32)
+async def fase_1_parametro() -> bool:
+    """Resuelve qué parámetro mueve la boca y lo verifica."""
+    print("\n[1/2] Parámetro que mueve la boca")
 
+    antes = await leer_apertura()
+    if antes is None:
+        print("      ❌ VTS no tiene ningún modelo cargado")
+        return False
+    print(f"      {PARAMETRO_LIVE2D} antes de tocar nada: {antes:.3f}")
 
-async def fase_1_oir() -> bool:
-    """¿VTube Studio está recibiendo audio del bus B1?"""
-    print("\n[1/2] ¿VTube Studio OYE el audio?")
-    salida = _buscar_dispositivo_salida()
-    if salida is None:
-        print("      No encontré el dispositivo de salida de Niu.")
+    activo = await resolver_parametro()
+    if activo is None:
         return False
 
-    audio = tono_de_prueba()
-    canales = int(sd.query_devices(salida)["max_output_channels"]) or 1
-    muestras = {n: [] for n in PARAMETROS_VOZ}
+    if activo != PARAMETRO_BOCA:
+        print(f"      ⚠️ se usará el respaldo {activo!r}: la boca se moverá igual,")
+        print("         pero VTS también escribe ese parámetro desde su micrófono.")
+        print("         Para el camino limpio, mapea una vez en VTube Studio:")
+        print(f"           configuración de parámetros del modelo → 'Mouth Open'")
+        print(f"           → cambia la entrada a {PARAMETRO_BOCA} → guarda")
 
-    print(f"      Reproduciendo {CICLOS} tonos en "
-          f"[{salida}] {sd.query_devices(salida)['name']}")
-    sd.play(np.column_stack([audio] * canales), FS, device=salida, blocking=False)
-    inicio = time.perf_counter()
-    while time.perf_counter() - inicio < TRAMO * 2 * CICLOS:
-        for nombre, valor in (await leer_parametros(PARAMETROS_VOZ)).items():
-            muestras[nombre].append(valor)
-        await asyncio.sleep(0.05)
-    sd.stop()
-
-    volumen = np.array(muestras["VoiceVolume"] or [0.0])
-    silencio = np.array(muestras["VoiceSilence"] or [0.0])
-    print(f"      VoiceVolume  min={volumen.min():.3f} max={volumen.max():.3f}")
-    print(f"      VoiceSilence min={silencio.min():.3f} max={silencio.max():.3f}")
-
-    if volumen.max() - volumen.min() > 0.05:
-        print("      ✅ VTS está oyendo el bus B1.")
-        return True
-
-    print("      ❌ VTS no está oyendo nada.")
-    print("         Revisa en VTube Studio (Configuración > Lipsync):")
-    print("           - 'Use microphone' activado")
-    print("           - dispositivo = 'Voicemeeter Out B1'")
-    print("           - si pone 'failed to initialize (timeout)', reinicia VTS:")
-    print("             Unity no reconstruye bien la lista de dispositivos.")
-    return False
+    despues = await leer_apertura()
+    print(f"      {PARAMETRO_LIVE2D} después del sondeo: {despues}")
+    return True
 
 
-async def fase_2_boca(oye: bool) -> None:
-    """¿El parámetro de apertura de boca se mueve mientras Niu habla?
+# ─── Fase 2: la boca se mueve mientras Niu habla ───────────────────────
 
-    Se ejecuta siempre, aunque la fase 1 haya fallado: esta fase reproduce una
-    frase real de Niu, así que también sirve para comprobar de oído que el audio
-    sale por los auriculares.
-    """
+
+async def muestrear_boca(muestras: dict[str, list[float]]) -> None:
+    """Lee la boca del modelo a 8 Hz mientras dura la frase."""
+    respuesta = await vts_client.peticion("Live2DParameterListRequest")
+    if not respuesta or respuesta.get("messageType") != "Live2DParameterListResponse":
+        return
+    for parametro in respuesta["data"].get("parameters", []):
+        if "mouth" in parametro["name"].lower():
+            muestras.setdefault(parametro["name"], []).append(
+                float(parametro["value"]))
+
+
+async def fase_2_movimiento() -> None:
+    """Dice una frase real y mide si la boca se mueve."""
     print("\n[2/2] Niu va a decir una frase. Escúchala.")
     print("      Sirve para dos cosas: confirmar que la OYES y medir la BOCA.")
 
-    respuesta = await pedir("Live2DParameterListRequest")
-    if respuesta.get("messageType") != "Live2DParameterListResponse":
-        print("      No se pudo leer la lista de parámetros del modelo.")
-        return
-
-    datos = respuesta["data"]
-    nombres = [p["name"] for p in datos.get("parameters", [])
-               if "mouth" in p["name"].lower()]
-    print(f"      Modelo: {datos.get('modelName')!r}")
-    if not nombres:
-        print("      El modelo no tiene parámetros de boca.")
-        return
-
+    muestras: dict[str, list[float]] = {}
     tarea = asyncio.create_task(
-        sintetizar_y_reproducir_voz_async(FRASE, "dia_por_dia/voz_temp.mp3"))
+        hablar_con_lipsync(FRASE, "dia_por_dia/voz_temp.mp3"))
 
-    muestras = {n: [] for n in nombres}
+    # 8 Hz: suficiente para ver el movimiento y no competir con los 40 Hz de
+    # la inyección (todas las peticiones van serializadas por un lock).
     while not tarea.done():
-        for nombre, valor in (await leer_live2d(nombres)).items():
-            muestras[nombre].append(valor)
-        await asyncio.sleep(0.07)
+        await muestrear_boca(muestras)
+        await asyncio.sleep(0.125)
     await tarea
 
-    recorridos = {}
-    for nombre, valores in muestras.items():
-        if not valores:
-            continue
-        recorridos[nombre] = max(valores) - min(valores)
-        print(f"      {nombre:18s} min={min(valores):6.3f} max={max(valores):6.3f} "
-              f"recorrido={recorridos[nombre]:.3f}")
+    if not muestras:
+        print("      ❌ no se pudo leer ningún parámetro de boca")
+        return
 
-    apertura = recorridos.get("ParamMouthOpenY", 0.0)
+    print()
+    recorridos = {}
+    for nombre, valores in sorted(muestras.items()):
+        datos = np.array(valores)
+        recorridos[nombre] = float(datos.max() - datos.min())
+        # Cruces por el punto medio: "cuántas veces se abrió/cerró", no solo
+        # "cuánto se movió en total". Una boca que se abre una vez y se queda
+        # así da recorrido alto pero 0 cruces.
+        medio = (datos.max() + datos.min()) / 2
+        cruces = int(np.sum(np.diff(datos > medio) != 0))
+        print(f"      {nombre:18s} min={datos.min():6.3f} max={datos.max():6.3f} "
+              f"recorrido={recorridos[nombre]:.3f} cruces={cruces:2d} "
+              f"muestras={len(datos)}")
+
+    apertura = recorridos.get(PARAMETRO_LIVE2D, 0.0)
+    print()
     if apertura > 0.05:
         print("      ✅ La boca se abre y se cierra: el lip sync funciona.")
-    elif not oye:
-        print("      ❌ La boca no se mueve, pero es coherente: la fase 1 ya")
-        print("         avisó de que VTS no está oyendo. Arregla la captura")
-        print("         primero y vuelve a ejecutar esta prueba.")
+        print("         Si al mirarla va desfasada, ajusta RETARDO_SALIDA en")
+        print("         core/lipsync.py (positivo = retrasar la boca).")
     else:
-        print("      ❌ La boca no se mueve, aunque VTS SÍ oye el audio.")
-        print("         Entonces el problema es el mapeo: en VTube Studio,")
-        print("         Configuración > Lipsync > botón de auto-configuración")
-        print("         para conectar MouthOpen -> ParamMouthOpenY.")
+        print("      ❌ La boca no se mueve aunque el parámetro se inyecta.")
+        print("         Revisa en VTube Studio que exista un mapeo a")
+        print(f"         {PARAMETRO_LIVE2D} y que su entrada sea")
+        print(f"         {PARAMETRO_BOCA} o VoiceVolumePlusMouthOpen.")
 
 
 async def main() -> None:
@@ -186,12 +173,16 @@ async def main() -> None:
     print(" LIP SYNC DE NIU — PRUEBA EN DOS FASES")
     print("=" * 70)
 
+    probar_envolvente()
+
     if not await vts_client.connect_and_auth():
         return
 
     try:
-        oye = await fase_1_oir()
-        await fase_2_boca(oye)
+        if not await fase_1_parametro():
+            print("\nSin parámetro no hay nada que probar. Aborta.")
+            return
+        await fase_2_movimiento()
     finally:
         await vts_client.close()
 
