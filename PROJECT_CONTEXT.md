@@ -59,9 +59,10 @@ core/brain.py
 LLMProvider (por defecto OllamaAdapter → /api/chat)
         ↓
 respuesta
-        └──────────────→ core/tts.py → MP3 → Voicemeeter In 1
+        └──────────────→ core/tts.py → MP3 → Voicemeeter Input
                                               ↓
-                                    VTube Studio (lip sync + audio)
+                              Strip 3 (Virtual VAIO) → A1 auriculares
+                                                    └→ B1 → VTube Studio (lip sync)
 ```
 
 ### Estado funcional documentado
@@ -69,7 +70,7 @@ respuesta
 - ✅ Cerebro desacoplado del proveedor mediante `LLMProvider`.
 - ✅ Backend local con Ollama (`qwen2.5:7b-instruct-q4_k_m` por defecto).
 - ✅ Memoria manual con ventana deslizante.
-- ✅ Voz con Edge-TTS reproducida en `Voicemeeter In 1`.
+- ✅ Voz con Edge-TTS reproducida en `Voicemeeter Input` (Strip 3, Virtual VAIO), que llega a A1 (auriculares) y a B1 (lip sync).
 - ✅ Conexión persistente con VTube Studio.
 - ✅ Entrada de voz con `sounddevice` (sin PyAudio) y detección de silencio por RMS.
 - ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
@@ -130,7 +131,7 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 | Hecho | Desacoplar proveedor LLM (`LLMProvider`) | Permitir Gemini, Ollama y futuros proveedores sin reescribir el cerebro |
 | Hecho | Ollama como backend por defecto | Sin cuotas, latencia local y control del modelo |
 | Hecho | Entrada de audio con `sounddevice` | PyAudio no tiene wheel para Python 3.14 |
-| Hecho | Salida TTS en `Voicemeeter In 1` | Ruteo de audio propio para que VTS haga lip sync |
+| Hecho | Salida TTS en `Voicemeeter Input` (Strip 3, VAIO) | `Voicemeeter In 1` no alimenta ninguna tira: el audio entraba y se descartaba |
 | Hecho | Salida por DirectSound (no WASAPI) | WASAPI falla al abrir el stream desde un hilo secundario |
 | Hecho | `STTProvider` con `whisper` y `gemini` | Mismo patrón que `LLMProvider`: cambiar de motor sin tocar captura ni `main.py` |
 | Hecho | Whisper local como motor por defecto | Sin cuotas, sin internet y sin enviar la voz a terceros |
@@ -161,12 +162,40 @@ GOOGLE_API_KEY=tu_api_key
 
 El backend local ya está integrado y responde, y el oído funciona de extremo a extremo. Los puntos débiles conocidos ahora son:
 
-- Las expresiones emocionales dependen de hotkeys con nombres concretos.
+- El lip sync depende de la captura de micrófono de VTube Studio, que falla con dispositivos virtuales (ver caso más abajo).
+- Las expresiones emocionales usan hotkeys (`MouthSmile`, `MouthFrown`...) que no existen en el modelo cargado.
 - El TTS bloquea el bucle mientras habla (no hay barge-in).
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
 - No hay tests automatizados del cerebro ni del adaptador.
 
-**Objetivo inmediato:** probar la conversación completa (`main.py`), medir la latencia total (voz → respuesta → voz) y después añadir tests y logging.
+**Objetivo inmediato:** medir la latencia total (voz → respuesta → voz) y después añadir tests y logging.
+
+### Caso resuelto: «Niu responde pero no se la oye»
+
+Síntoma: los logs decían `[TTS] Reproducción completada` sin ningún error, pero no salía sonido.
+
+Causa real: `core/tts.py` reproducía en `Voicemeeter In 1`, y en este driver ese endpoint **no alimenta ninguna tira**: el audio entraba y se descartaba en silencio. Se comprobó recorriendo los 32 endpoints de Voicemeeter y grabando el bus B1 mientras sonaba un tono:
+
+| endpoint | nivel en el bus B1 |
+|---|---|
+| `Voicemeeter In 1` (el que se usaba) | −240 dBFS (silencio digital) |
+| `Voicemeeter In 2/3/4/5`, `VAIO3`, `AUX` | −240 dBFS |
+| `Voicemeeter Input` | **−12 dBFS** ✅ |
+
+`Voicemeeter Input` cae en el Strip 3 (Virtual VAIO), que está ruteado a A1 (auriculares) y B1 (VTube Studio). Lección: que una función de reproducción «termine sin error» no significa que el audio haya llegado a su destino; hay que medirlo en el otro extremo de la cadena.
+
+### Caso abierto: «el avatar no mueve la boca»
+
+El lip sync de VTS no lo hace Niu: lo hace VTube Studio escuchando `Voicemeeter Out B1`. Comprobado con la API y con el log de VTS:
+
+| comprobación | resultado |
+|---|---|
+| micrófono configurado | `Voicemeeter Out B1` ✅ |
+| mapeo del modelo | `VoiceVolumePlusMouthOpen` → `ParamMouthOpenY` ✅ |
+| tipo de lip sync | `OcculusVRLipsync` (Simple, legacy) → cambiado a `ULipSync` |
+| captura real | `Failed to initialize microphone (timeout). Deactivating microphone.` ❌ |
+
+El motor de lip sync funciona (`VoiceSilence` responde), pero la captura de micrófono de Unity no abre el dispositivo virtual después del primer cierre y VTS desactiva el micro por su cuenta. El dispositivo está sano: `sounddevice` lo abre a 48 kHz sin problema. La prueba objetiva está en `probar_lipsync.py` (mide `VoiceVolume` y `ParamMouthOpenY` por la API, sin depender de mirar la pantalla).
 
 ### Caso resuelto: «el micrófono no entendía»
 
@@ -228,6 +257,9 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Depuración por medición controlada**: cambiar una sola variable (canales, frecuencia, modelo) y comparar números objetivos (f0, centroide espectral, dBFS, transcripción). Formular una hipótesis y refutarla con datos, en vez de acumular cambios.
 - **Niveles en dBFS**: medir en absoluto (contra el fondo de escala) y no solo normalizando por archivo, porque normalizar oculta si lo que hay es señal o ruido amplificado.
 - **Contexto del decoder (`initial_prompt`)**: Whisper elige palabras por contexto; sin él, un nombre propio como «Niu» se convierte en «New».
+- **Medir en el otro extremo de la cadena**: que una función de reproducción termine correctamente no prueba que el audio llegue; hay que grabarlo donde se supone que suena.
+- **Los parámetros Live2D no se pueden escribir por la API**: `InjectParameterDataRequest` solo acepta parámetros de tracking; el lip sync lo hace VTS con su propio micrófono.
+- **Definiciones duplicadas en Python**: si un método se define dos veces en la misma clase, la segunda sustituye a la primera sin avisar; el código anterior queda muerto y engaña al leerlo.
 
 ### Aún no asumir dominio completo de
 
@@ -251,6 +283,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
+- El lip sync depende de la captura de micrófono de VTS, que se rompe con dispositivos virtuales y solo se recupera reiniciando VTS.
+- Las expresiones llaman a hotkeys que no existen en el modelo (`MouthSmile`, `MouthFrown`...): fallan sin avisar y no hay alternativa definida.
 
 ---
 

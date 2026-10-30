@@ -40,7 +40,18 @@ TONO = "+0Hz"                   # Edge-TTS usa Hz para el tono, no porcentaje
 TARGET_SAMPLE_RATE = 48000  # Hz, frecuencia del mezclador de Voicemeeter
 
 # Salida de voz: por aquí escucha VTube Studio para el lip sync.
-DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA", "Voicemeeter In 1")
+#
+# OJO con el nombre. En este driver (Voicemeeter "8 points") existen dos
+# familias de endpoints que se parecen:
+#   "Voicemeeter Input"                 -> Strip 3 (Virtual VAIO)  <-- el bueno
+#   "Voicemeeter In 1" ... "In 5"       -> puntos de entrada hardware
+#
+# Comprobado midiendo el bus B1 mientras se reproducía un tono:
+#   "Voicemeeter In 1" -> -240 dBFS (silencio digital, no llega a ningún lado)
+#   "Voicemeeter Input" ->  -12 dBFS (llega a VAIO -> A1 + B1)
+#
+# Con "Voicemeeter In 1" Niu "reproducía" sin error y no sonaba nada.
+DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA", "Voicemeeter Input")
 
 
 def _limpiar_texto_para_tts(texto: str) -> str:
@@ -148,10 +159,16 @@ async def _reproducir_en_dispositivo(ruta_audio: str):
             data = _remuestrear_audio(data, fs, TARGET_SAMPLE_RATE)
             fs = TARGET_SAMPLE_RATE
 
-        # WASAPI exige que el número de canales coincida con el del dispositivo
-        canales = sd.query_devices(device_id)["max_output_channels"]
-        if data.ndim == 1 and canales >= 2:
-            data = np.column_stack([data, data])
+        # El endpoint de Voicemeeter expone 8 canales: hay que entregarle
+        # exactamente ese número. Los canales sobrantes van en silencio y
+        # Voicemeeter usa los dos primeros.
+        canales = int(sd.query_devices(device_id)["max_output_channels"]) or 1
+        if data.ndim == 1:
+            data = data[:, None]
+        if data.shape[1] < canales:
+            data = np.pad(data, ((0, 0), (0, canales - data.shape[1])))
+        elif data.shape[1] > canales:
+            data = data[:, :canales]
 
         def _play():
             sd.play(data, fs, device=device_id)

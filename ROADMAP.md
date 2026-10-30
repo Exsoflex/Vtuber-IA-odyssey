@@ -83,6 +83,39 @@ El síntoma afectaba a **todos** los motores (Google devolvía vacío, Whisper a
 
 ---
 
+# 🎯 FASE 2.7: SALIDA DE AUDIO Y LIP SYNC
+
+Del oído pasamos a la boca: que Niu se oiga y que el avatar la acompañe.
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Salida de TTS | `Voicemeeter In 1` no alimenta ninguna tira; el destino es `Voicemeeter Input` | ✅ |
+| Canales de salida | El endpoint expone 8 canales: se rellenan con silencio, no se duplican a 2 | ✅ |
+| Verificación objetiva | Tono y frase reales medidos en el bus B1 (−34 dBFS, 3,8 s de señal) | ✅ |
+| Reconexión con VTS | Reintentos (5 × 2 s) en vez de rendirse ante `WinError 1225` | ✅ |
+| Limpieza de `vts_client.py` | Métodos definidos 4 veces; se conserva solo la versión viva (504 → 233 líneas) | ✅ |
+| Prueba del lip sync | `probar_lipsync.py`: mide `VoiceVolume` y `ParamMouthOpenY` por la API | ✅ |
+| Captura de VTS | El micro de VTS muere con `Failed to initialize (timeout)`; requiere reiniciar VTS | ⚠️ abierto |
+| Expresiones | Los hotkeys `MouthSmile`/`MouthFrown`/`MouthAngry`/`MouthOpen` no existen en el modelo | ⚠️ pendiente |
+
+### Criterio de éxito
+
+```text
+voz de Niu → Voicemeeter (strip VAIO) → A1 auriculares   (se oye)
+                                     → B1 VTube Studio   (mueve la boca)
+```
+
+### Pregunta guía del hito
+
+> "Si el programa dice que ha reproducido el audio, ¿cómo demuestras que el sonido llegó de verdad?"
+
+```text
+La respuesta está en el otro extremo de la cadena: grabar el bus donde debería
+sonar y medir. Un "sin errores" en el origen no prueba nada en el destino.
+```
+
+---
+
 # 🎯 FASE 3: ROBUSTEZ Y CALIDAD
 
 | Tarea | Descripción |
