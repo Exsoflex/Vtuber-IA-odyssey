@@ -192,7 +192,7 @@ Objetivo: poder crear contenido en inglés sin bifurcar el código, y que Niu su
 | Reglas de estilo propias | Muletillas nativas y prohibición de traducir las españolas en literal | ✅ |
 | Voz por idioma | La voz sale del perfil; `NIU_VOZ` la fuerza sin tocar código | ✅ |
 | Muestras de voz | `muestras_voces/`: la misma frase con 4 voces inglesas para elegir de oído | ✅ |
-| Voz elegida | `en-US-AriaNeural` con tono `-15Hz`; variantes en `muestras_voces/niu_aria_*.mp3` | ✅ |
+| Voz elegida | `en-US-AriaNeural` en tono normal (`+0Hz`); variantes descartadas en `muestras_voces/niu_aria_*.mp3` | ✅ |
 | Tono por idioma | El tono sale del perfil; `NIU_TONO` lo fuerza | ✅ |
 | STT en el idioma del perfil | `idioma_stt()` + `prompt_stt`: hablar y oír apuntan al mismo idioma | ✅ |
 | Personalidad en inglés | Comprobar con conversación real que el personaje no se desdibuja | ⚠️ pendiente |
@@ -222,11 +222,27 @@ Y faltaba la otra mitad de la tubería: **el oído**. El perfil elegía qué dec
 
 | Tarea | Descripción |
 |-------|-------------|
-| Config tipada | Migrar `.env` a settings tipados |
+| Config tipada | Migrar `.env` a settings tipados (lo resuelve la fase 0 del panel, ver `PLAN_PANEL.md`) |
 | Logging profesional | Niveles, formato estructurado, rotación |
 | Tests unitarios | Memoria, poda, proveedor LLM y VTube Studio |
 | Type checking | `mypy` + `ruff` |
 | Manejo de errores | Reintentos, timeouts y degradación controlada |
+
+---
+
+# 🎯 FASE 3.5: PANEL DE CONTROL
+
+Objetivo: operar a Niu y ver la conversación desde una interfaz local, sin editar `.env`.
+Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Ajustes tipados | `core/config.py`: un solo objeto validado, `config.json` y valores por defecto | ⚠️ pendiente |
+| Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ⚠️ pendiente |
+| Panel mínimo | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar y estado | ⚠️ pendiente |
+| Vista de chat | Transcripción, texto de Niu en streaming y métricas por turno | ⚠️ pendiente |
+| Ajustes en la UI | 10 esenciales, avanzados plegados, «restaurar» y «probar voz» | ⚠️ pendiente |
+| Tema espacial | Blanco azulado, azules/violetas, vidrio suave y campo de estrellas | ⚠️ pendiente |
 
 ---
 

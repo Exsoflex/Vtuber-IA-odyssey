@@ -91,7 +91,7 @@ respuesta completa.
 - ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
 - ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
 - ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
-- ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige voz, tono, reglas de estilo y **prompt del STT**. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas, con la voz de Aria ligeramente grave (`-15Hz`). La voz y el tono se pueden forzar con `NIU_VOZ` / `NIU_TONO`.
+- ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige voz, tono, reglas de estilo y **prompt del STT**. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas, con la voz de Aria en tono normal. La voz y el tono se pueden forzar con `NIU_VOZ` / `NIU_TONO`.
 - ✅ **Oído en el idioma del perfil**: `idioma_stt()` devuelve el código del perfil salvo que `NIU_STT_IDIOMA` diga otra cosa. Antes estaba en automático con un prompt en español, y Whisper transcribía el inglés en español.
 - ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
@@ -188,7 +188,7 @@ GOOGLE_API_KEY=tu_api_key
 |---|---|---|
 | `NIU_IDIOMA` | `es` | perfil de idioma: voz, tono, reglas de estilo y prompt del STT (`es`, `en`) |
 | `NIU_VOZ` | la del perfil | forzar una voz concreta de Edge-TTS |
-| `NIU_TONO` | la del perfil (`+0Hz` es, `-15Hz` en) | forzar el tono de Edge-TTS (`-25Hz`) |
+| `NIU_TONO` | la del perfil (`+0Hz`) | forzar el tono de Edge-TTS (`-25Hz`) |
 | `NIU_SALIDA` | dispositivo de Windows | forzar el dispositivo de salida de la voz |
 | `NIU_MIC` | `DGM20 USB Microphone` | nombre del micrófono |
 | `NIU_SILENCIO_FINAL` | `0.9` | silencio que hay que oír para cortar la frase |

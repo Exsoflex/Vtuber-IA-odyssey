@@ -108,12 +108,12 @@ ESPANOL = Idioma(
 
 INGLES = Idioma(
     codigo="en",
-    # Aria: "Positive, Confident". Elegida por Héctor de oído entre Emma, Ava y
-    # Ana. El tono va ligeramente por debajo de 0 Hz: quita brillo sin que la
-    # voz se vuelva madura (Ava, que era la alternativa cálida, resultaba
-    # demasiado grave para el personaje).
+    # Aria: "Positive, Confident". Elegida por Héctor de oído entre Emma, Ava,
+    # Ana y cuatro variantes de tono. Se queda en el tono normal: bajarle los
+    # hercios no aportaba y Ava, la alternativa cálida, resultaba demasiado
+    # madura para el personaje.
     voz="en-US-AriaNeural",
-    tono="-15Hz",
+    tono="+0Hz",
     nombre="inglés",
     reglas="""
 ## LANGUAGE (GOLDEN RULE)
