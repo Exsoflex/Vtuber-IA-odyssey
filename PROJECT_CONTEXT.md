@@ -181,6 +181,22 @@ Ejemplo documentado:
 GOOGLE_API_KEY=tu_api_key
 ```
 
+### Variables que cambian el comportamiento sin tocar código
+
+| variable | por defecto | para qué |
+|---|---|---|
+| `NIU_IDIOMA` | `es` | perfil de idioma: voz y reglas de estilo (`es`, `en`) |
+| `NIU_VOZ` | la del perfil | forzar una voz concreta de Edge-TTS |
+| `NIU_SALIDA` | dispositivo de Windows | forzar el dispositivo de salida de la voz |
+| `NIU_MIC` | `DGM20 USB Microphone` | nombre del micrófono |
+| `NIU_SILENCIO_FINAL` | `0.9` | silencio que hay que oír para cortar la frase |
+| `NIU_STT_IDIOMA` | automático | fijar el idioma del STT (`en`, `es`) |
+| `NIU_WHISPER_MODELO` | `large-v3-turbo` | modelo de Whisper |
+| `NIU_WHISPER_BEAM` | `1` | hipótesis del decodificador (más = más calidad y más lento) |
+| `NIU_TTS_TIMEOUT` | `15` | segundos antes de rendirse con una frase |
+| `NIU_TTS_INTENTOS` | `2` | reintentos de Edge-TTS |
+| `NIU_OLLAMA_KEEP_ALIVE` | `30m` | cuánto mantiene Ollama el modelo en memoria |
+
 ---
 
 ## 🧪 Problema actual
