@@ -14,8 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from core import tts
 from core.audio_devices import buscar_dispositivo
 from core.brain import NiuBrain
+from core.idiomas import IDIOMA
 from core.stt import (
     FRASES_SALIDA,
     SAMPLE_RATE,
@@ -156,6 +158,14 @@ async def main():
 
     # 1. Cerebro: Ollama local por defecto
     brain = NiuBrain()
+
+    # El perfil de idioma decide voz y reglas de estilo. Se imprime porque,
+    # si alguien olvidó cambiar NIU_IDIOMA, es mejor verlo al arrancar que
+    # descubrirlo cuando Niu contesta en el idioma equivocado.
+    print(f"[IDIOMA] Perfil: {IDIOMA.nombre} ({IDIOMA.codigo}) | voz: {tts.VOZ_NIU}")
+    if IDIOMA_STT is None:
+        print("[IDIOMA] STT: detección automática "
+              "(NIU_STT_IDIOMA=\"en\" para fijarlo)")
 
     # Cargar el modelo ahora, no en mitad de la primera frase. Es opcional:
     # si el proveedor no lo soporta o falla, se sigue igual.

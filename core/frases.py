@@ -56,6 +56,19 @@ PAUSAS_DEBILES = ",;:—"
 # llegar al primer punto, no queremos esperar medio minuto.
 MAXIMO_POR_TROZO = 140
 
+# Cuánto tiene que durar (en caracteres) un trozo para valer la pena decirlo
+# por separado.
+#
+# Medido: Edge-TTS mete silencio en los extremos de cada frase y abrir y cerrar
+# el dispositivo cuesta un poco, así que cada frontera añade ~0,3 s de pausa
+# aunque el audio esté recortado. Un "¡Hola!" suelto (0,6 s de voz) no compensa
+# esa pausa: suena a punto y aparte donde no lo hay.
+#
+# Por debajo de este umbral, la frase se acumula con la siguiente y se dicen
+# juntas. 40 caracteres son unas dos palabras largas o una frase corta con
+# sentido ("O sea, no me digas eso.").
+MINIMO_POR_TROZO = 40
+
 
 def _es_puntos_suspensivos(texto: str, i: int) -> bool:
     """¿El carácter en `i` forma parte de unos puntos suspensivos?
@@ -102,7 +115,9 @@ def _punto_de_corte_largo(texto: str, maximo: int) -> int | None:
 
 
 def extraer_frases(
-    buffer: str, maximo: int = MAXIMO_POR_TROZO
+    buffer: str,
+    maximo: int = MAXIMO_POR_TROZO,
+    minimo: int = 0,
 ) -> tuple[list[str], str]:
     """Separa de `buffer` lo que ya se puede decir y lo que aún no.
 
@@ -113,6 +128,11 @@ def extraer_frases(
     Args:
         buffer: todo el texto acumulado que aún no se ha dicho.
         maximo: caracteres máximos antes de cortar por la última pausa.
+        minimo: caracteres mínimos para que un trozo se diga por separado. Por
+            debajo, se acumula con el siguiente. A 0 (por defecto) corta en
+            todas las frases cerradas: así esta función es solo el mecanismo,
+            y la política de "no trocear de más" la aplican los generadores
+            (`frases_de`, `frases_de_async`).
 
     Returns:
         `(frases, resto)`. `frases` puede estar vacía y `resto` puede estar
@@ -121,15 +141,27 @@ def extraer_frases(
     """
     frases: list[str] = []
     resto = buffer
+    pendiente = ""
 
     while True:
         corte = _punto_de_corte(resto)
         if corte is None:
             break
-        frase = resto[:corte].strip()
-        if frase:
-            frases.append(frase)
+        trozo = resto[:corte].strip()
         resto = resto[corte:].lstrip()
+        if not trozo:
+            continue
+        pendiente = f"{pendiente} {trozo}".strip() if pendiente else trozo
+        if len(pendiente) >= minimo:
+            frases.append(pendiente)
+            pendiente = ""
+
+    # El trozo corto pendiente no se pierde: vuelve al buffer para acumularse
+    # con lo que llegue después. Se le deja un espacio al final porque el
+    # siguiente fragmento del modelo se concatena directamente: sin él, las
+    # palabras se pegaban ("¡Hola!" + "Sí" -> "¡Hola!Sí").
+    if pendiente:
+        resto = f"{pendiente} {resto}" if resto else f"{pendiente} "
 
     # Texto largo sin ningún signo: se corta por pausa para no quedarse mudo.
     while len(resto) > maximo:
@@ -145,27 +177,46 @@ def extraer_frases(
 
 
 def frases_de(
-    fragmentos: Iterator[str], maximo: int = MAXIMO_POR_TROZO
+    fragmentos: Iterator[str],
+    maximo: int = MAXIMO_POR_TROZO,
+    minimo: int = MINIMO_POR_TROZO,
 ) -> Iterator[str]:
-    """Convierte un chorro de fragmentos en un chorro de frases."""
+    """Convierte un chorro de fragmentos en un chorro de frases.
+
+    La primera frase sale con cualquier tamaño; el mínimo se aplica a partir de
+    la segunda. Es una decisión de producto: al empezar a hablar manda la
+    velocidad (un «¡Bueno...!» rápido se agradece), y a partir de ahí manda el
+    ritmo (un trozo de 0,6 s suena a punto y aparte).
+    """
     buffer = ""
+    emitidas = 0
     for fragmento in fragmentos:
         buffer += fragmento
-        frases, buffer = extraer_frases(buffer, maximo)
-        yield from frases
+        limite = 0 if emitidas == 0 else minimo
+        frases, buffer = extraer_frases(buffer, maximo, limite)
+        for frase in frases:
+            emitidas += 1
+            yield frase
     if buffer.strip():
         yield buffer.strip()
 
 
 async def frases_de_async(
-    fragmentos: AsyncIterator[str], maximo: int = MAXIMO_POR_TROZO
+    fragmentos: AsyncIterator[str],
+    maximo: int = MAXIMO_POR_TROZO,
+    minimo: int = MINIMO_POR_TROZO,
 ) -> AsyncIterator[str]:
     """Igual que `frases_de`, para el generador asíncrono del cerebro."""
     buffer = ""
+    emitidas = 0
     async for fragmento in fragmentos:
         buffer += fragmento
-        frases, buffer = extraer_frases(buffer, maximo)
+        # La primera frase no espera al mínimo: empezar a hablar pronto importa
+        # más que el ritmo del primer trozo.
+        limite = 0 if emitidas == 0 else minimo
+        frases, buffer = extraer_frases(buffer, maximo, limite)
         for frase in frases:
+            emitidas += 1
             yield frase
     if buffer.strip():
         yield buffer.strip()

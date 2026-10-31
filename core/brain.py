@@ -7,6 +7,7 @@ implementación de LLMProvider. El cerebro no sabe si detrás hay Ollama o Gemin
 
 import os
 
+from core.idiomas import IDIOMA, Idioma
 from core.llm_provider import LLMConfig, LLMProvider, Messages
 from core.ollama_adapter import OllamaAdapter
 
@@ -44,17 +45,31 @@ class NiuBrain:
     Cerebro de Niu: memoria, personalidad y llamada al proveedor LLM.
     """
 
-    def __init__(self, provider: LLMProvider | None = None, ventana: int = 20):
+    def __init__(self, provider: LLMProvider | None = None, ventana: int = 20,
+                 idioma: Idioma | None = None):
         """
         Args:
             provider: Implementación de LLMProvider. Por defecto usa Ollama local.
             ventana: Número máximo de mensajes guardados en memoria.
+            idioma: Perfil de idioma (ver `core/idiomas.py`). Por defecto, el
+                elegido con `NIU_IDIOMA`.
         """
         self.provider = provider or OllamaAdapter(
             model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_k_m"),
         )
         self.ventana = ventana
+        self.idioma = idioma or IDIOMA
         self.mi_historial: Messages = []
+
+    def _instruccion(self) -> str:
+        """Personalidad + reglas del idioma activo.
+
+        La personalidad está escrita una sola vez, en español. El perfil no la
+        reescribe: le añade el bloque que fija en qué idioma y con qué registro
+        hay que expresarla. Así no hay dos prompts que mantener en paralelo y
+        que se desincronicen al primer cambio.
+        """
+        return f"{SISTEMA_INSTRUCCION_NIU}\n{self.idioma.reglas}"
 
     def _normalizar_entrada(self, mensaje_contenido) -> str:
         """
@@ -83,7 +98,7 @@ class NiuBrain:
         try:
             respuesta = await self.provider.generate(
                 messages=self.mi_historial,
-                system_instruction=SISTEMA_INSTRUCCION_NIU,
+                system_instruction=self._instruccion(),
                 config=LLMConfig(temperature=0.9),
             )
             respuesta_texto = respuesta.text.strip()
@@ -107,7 +122,7 @@ class NiuBrain:
         try:
             async for fragmento in self.provider.generate_stream(
                 messages=self.mi_historial,
-                system_instruction=SISTEMA_INSTRUCCION_NIU,
+                system_instruction=self._instruccion(),
                 config=LLMConfig(temperature=0.9),
             ):
                 texto_completo += fragmento

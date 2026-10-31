@@ -15,7 +15,7 @@ Ejecutar:
 
 import pytest
 
-from core.frases import MAXIMO_POR_TROZO, extraer_frases, frases_de
+from core.frases import MAXIMO_POR_TROZO, MINIMO_POR_TROZO, extraer_frases, frases_de
 
 
 # ─── La regla básica: signo final + espacio ────────────────────────────
@@ -113,8 +113,54 @@ def test_emoji_compuesto_no_se_parte():
     assert frases == [f"Mi familia {familia} es genial!"]
 
 
-# ─── Texto largo sin puntuación ────────────────────────────────────────
+# ─── No trocear de más (la política del generador) ─────────────────────
 
+
+def test_una_frase_cortisima_no_se_dice_sola():
+    """'¡Hola!' suelta añade una pausa de 0,3 s que no compensa."""
+    frases, resto = extraer_frases("¡Hola! ", minimo=40)
+    assert frases == []
+    # El resto vuelve con un espacio al final a propósito: el siguiente
+    # fragmento del modelo se concatena tal cual, sin separador propio.
+    assert resto == "¡Hola! "
+    assert resto.strip() == "¡Hola!"
+
+
+def test_se_acumula_hasta_llegar_al_minimo():
+    frases, resto = extraer_frases("¡Hola! ¿Cómo estás? Me alegro mucho de verte. ",
+                                   minimo=40)
+    assert frases == ["¡Hola! ¿Cómo estás? Me alegro mucho de verte."]
+    assert resto == ""
+
+
+def test_sin_minimo_corta_en_todas():
+    """El mecanismo no aplica la política: a minimo=0 corta en cada frase."""
+    frases, _ = extraer_frases("¡Hola! ¿Cómo estás? Me alegro mucho de verte. ",
+                               minimo=0)
+    assert frases == ["¡Hola!", "¿Cómo estás?", "Me alegro mucho de verte."]
+
+
+def test_el_generador_no_emite_trozos_minusculos():
+    texto = "¡Hola! ¿Qué tal? Pues yo muy bien, gracias. ¿Y tú?"
+    frases = list(frases_de(iter(texto)))
+    # La primera está exenta (empezar pronto importa) y la última se vacía al
+    # terminar el texto; el resto no puede salir troceado.
+    assert all(len(f) >= MINIMO_POR_TROZO for f in frases[1:-1])
+
+
+def test_la_primera_frase_sale_aunque_sea_cortisima():
+    """Al arrancar manda la velocidad: un '¡Bueno...!' rápido se agradece."""
+    frases = list(frases_de(iter("¡Hola! Sí. Vale. Me parece perfecto, de verdad. ")))
+    assert frases[0] == "¡Hola!"
+
+
+def test_el_minimo_no_pierde_texto():
+    texto = "¡Hola! Sí. Vale. Me parece perfecto, de verdad. Vamos allá. "
+    frases = list(frases_de(iter(texto)))
+    assert " ".join(frases).split() == texto.split()
+
+
+# ─── Texto largo sin puntuación ────────────────────────────────────────
 
 def test_texto_largo_sin_puntos_corta_por_coma():
     texto = "bueno " * 20 + ", " + "sigo hablando " * 20

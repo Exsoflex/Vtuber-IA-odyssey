@@ -25,6 +25,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 from core.audio_devices import buscar_dispositivo, buscar_salida_por_defecto
+from core.idiomas import VOZ
 
 load_dotenv()
 
@@ -49,7 +50,10 @@ except ImportError:
           "Instala con: pip install sounddevice soundfile")
 
 # ─── Configuración de voz ──────────────────────────────────────────────
-VOZ_NIU = "es-MX-DaliaNeural"  # Voz natural en español de Edge-TTS
+# La voz la decide el perfil de idioma (core/idiomas.py): una voz española
+# leyendo inglés suena a española leyendo inglés. `NIU_VOZ` la fuerza sin tocar
+# código, y `NIU_IDIOMA` cambia de perfil.
+VOZ_NIU = VOZ
 VELOCIDAD = "+0%"              # Velocidad normal
 TONO = "+0Hz"                  # Edge-TTS usa Hz para el tono, no porcentaje
 
@@ -105,6 +109,57 @@ class AudioPreparado:
     def duracion(self) -> float:
         """Duración en segundos."""
         return len(self.mono) / self.fs
+
+
+# ─── Recorte del silencio de los extremos ──────────────────────────────
+#
+# Edge-TTS rellena cada frase con silencio: medido en este equipo, ~0,18 s al
+# principio y ~0,85 s al final. En una respuesta entera no se nota, porque el
+# relleno solo está en los bordes. Al hablar por partes, cada trozo arrastra su
+# propio relleno y las fronteras se llenan de aire: con 3 partes son ~2 s de
+# pausa, y "¡Hola!" pasaba de 1,87 s a solo 0,40 s de voz real.
+#
+# Se recorta, pero NO hasta cero: un poco de silencio al final de una frase es
+# lo que hace que el habla suene natural y no atropellada. Estos márgenes son
+# los que suenan bien, no los que más ahorran.
+MARGEN_INICIO = 0.05         # s de silencio que se conservan antes de la voz
+MARGEN_FINAL = 0.15          # s de silencio que se conservan después
+VENTANA_SILENCIO = 0.025     # s por bloque analizado (el mismo criterio que la boca)
+UMBRAL_SILENCIO = 0.02       # 2 % del pico: por debajo, es silencio
+
+
+def recortar_silencio(mono: np.ndarray, fs: int) -> np.ndarray:
+    """Quita el silencio de los extremos, conservando un margen audible.
+
+    Es una función pura (entra un array, sale otro), así que se puede probar sin
+    red ni audio real.
+
+    Args:
+        mono: muestras float32 en [-1, 1].
+        fs: frecuencia de muestreo.
+
+    Returns:
+        El mismo audio, recortado. Si todo es silencio, se devuelve igual: no
+        hay nada que recortar y devolver un array vacío rompería la reproducción.
+    """
+    bloque = max(1, int(fs * VENTANA_SILENCIO))
+    n = len(mono) // bloque
+    if n == 0:
+        return mono
+
+    trozos = mono[: n * bloque].reshape(n, bloque)
+    rms = np.sqrt((trozos.astype(np.float64) ** 2).mean(axis=1))
+
+    # Umbral relativo al pico, no absoluto: el volumen de Edge-TTS puede variar.
+    umbral = max(float(rms.max()) * UMBRAL_SILENCIO, 1e-6)
+    activos = np.flatnonzero(rms > umbral)
+    if len(activos) == 0:
+        return mono
+
+    inicio = max(0, int((activos[0] * VENTANA_SILENCIO - MARGEN_INICIO) * fs))
+    fin = min(len(mono),
+              int(((activos[-1] + 1) * VENTANA_SILENCIO + MARGEN_FINAL) * fs))
+    return mono[inicio:fin]
 
 
 def _limpiar_texto_para_tts(texto: str) -> str:
@@ -217,6 +272,7 @@ def preparar_audio(ruta_audio: str) -> AudioPreparado | None:
        declarar más canales de los que existen de verdad (el de DirectSound
        dice 8, formato 7.1), pero la voz es mono: va en los dos primeros y el
        resto en silencio.
+    4. Recorta el silencio de los extremos (`recortar_silencio`).
 
     Returns:
         `AudioPreparado` o None si no se pudo leer.
@@ -240,6 +296,16 @@ def preparar_audio(ruta_audio: str) -> AudioPreparado | None:
         print(f"[TTS] Re-muestreando de {fs} Hz a {TARGET_SAMPLE_RATE} Hz...")
         mono = _remuestrear_audio(mono, fs, TARGET_SAMPLE_RATE)
         fs = TARGET_SAMPLE_RATE
+
+    # Recorte del relleno de Edge-TTS. Importa sobre todo hablando por partes:
+    # cada trozo trae su propio silencio y sin recortarlo las fronteras suman
+    # pausas de casi un segundo.
+    duracion_antes = len(mono) / fs
+    mono = recortar_silencio(mono, fs)
+    recortado = duracion_antes - len(mono) / fs
+    if recortado >= 0.2:
+        print(f"[TTS] Recorte de silencio: {recortado:.2f} s "
+              f"({duracion_antes:.2f} s → {len(mono) / fs:.2f} s)")
 
     device_id = _buscar_dispositivo_salida()
     canales = 1
