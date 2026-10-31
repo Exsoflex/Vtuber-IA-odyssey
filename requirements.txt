@@ -9,6 +9,12 @@ httpx
 edge-tts
 websockets
 
+# ─── Panel de control (127.0.0.1) ──────────────────────────────────────────
+# FastAPI + uvicorn: el panel es una web local. El navegador ya es el
+# renderizador, así que no hay que empaquetar una aplicación de escritorio.
+fastapi
+uvicorn
+
 # ─── STT local (NIU_STT=whisper) ───────────────────────────────────────────
 # faster-whisper: reimplementación de Whisper sobre CTranslate2 (4-10x más
 # rápido y con cuantización int8).

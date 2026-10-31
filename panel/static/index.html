@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Niu · Panel de control</title>
+  <link rel="stylesheet" href="/estaticos/estilo.css">
+</head>
+<body>
+  <div class="cielo" aria-hidden="true"></div>
+
+  <header class="cabecera">
+    <div class="marca">
+      <span class="orbita" id="orbita" data-estado="apagado" aria-hidden="true"></span>
+      <div class="marca-texto">
+        <h1>Niu</h1>
+        <p>Autonomous Engine</p>
+      </div>
+    </div>
+    <p class="pastilla" id="pastilla" data-estado="apagado" aria-live="polite">
+      <span class="pastilla-punto" aria-hidden="true"></span>
+      <span id="pastilla-texto">Apagado</span>
+    </p>
+  </header>
+
+  <main class="rejilla">
+    <section class="tarjeta" aria-labelledby="t-motor">
+      <h2 id="t-motor">Motor</h2>
+
+      <div class="acciones">
+        <button type="button" class="boton primario" id="btn-iniciar">Iniciar</button>
+        <button type="button" class="boton peligro" id="btn-detener">Detener</button>
+      </div>
+
+      <button type="button" class="boton fantasma" id="btn-voz">Detener voz</button>
+      <p class="nota"><strong>Detener voz</strong> la calla sin cerrar la sesión:
+        el motor sigue escuchando.</p>
+    </section>
+
+    <section class="tarjeta" aria-labelledby="t-estado">
+      <h2 id="t-estado">Estado</h2>
+      <ul class="chips" id="chips">
+        <li class="chip" data-clave="motor"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Motor</span><span class="chip-valor">—</span></li>
+        <li class="chip" data-clave="ollama"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Ollama</span><span class="chip-valor">—</span></li>
+        <li class="chip" data-clave="vts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">VTube Studio</span><span class="chip-valor">—</span></li>
+        <li class="chip" data-clave="microfono"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Micrófono</span><span class="chip-valor">—</span></li>
+        <li class="chip" data-clave="tts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">TTS</span><span class="chip-valor">—</span></li>
+      </ul>
+    </section>
+
+    <section class="tarjeta ancha" aria-labelledby="t-voz">
+      <h2 id="t-voz">Voz activa</h2>
+      <dl class="datos">
+        <div><dt>Idioma</dt><dd id="dato-idioma">—</dd></div>
+        <div><dt>Voz</dt><dd id="dato-voz">—</dd></div>
+        <div><dt>Tono</dt><dd id="dato-tono">—</dd></div>
+      </dl>
+    </section>
+  </main>
+
+  <p class="aviso" id="aviso" role="alert" hidden></p>
+
+  <script src="/estaticos/app.js"></script>
+</body>
+</html>

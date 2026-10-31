@@ -1,0 +1,368 @@
+/* ─── Panel de Niu · tema espacial claro ──────────────────────────────────
+   Regla del plan: el espacio vive en el fondo y en los estados; los datos van
+   limpios. Nada de texto sobre nebulosas ni animaciones dentro del chat.
+   Todo el color sale de estos tokens para que el tema sea un solo sitio.
+   ──────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --fondo: #f6f9ff;
+  --superficie: rgba(255, 255, 255, 0.74);
+  --superficie-fuerte: rgba(255, 255, 255, 0.92);
+  --borde: rgba(120, 150, 255, 0.22);
+  --borde-fuerte: rgba(120, 150, 255, 0.38);
+  --tinta: #141b2e;
+  --tinta-suave: #5b6478;
+  --azul: #3d7bfd;
+  --indigo: #5b5bd6;
+  --violeta: #8b5cf6;
+  --menta: #2fbf8f;
+  --ambar: #e0a100;
+  --coral: #e5566a;
+
+  --radio: 18px;
+  --sombra: 0 18px 40px -28px rgba(43, 63, 130, 0.55);
+  --sombra-suave: 0 8px 20px -16px rgba(43, 63, 130, 0.4);
+  --fuente: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  margin: 0;
+  padding: 32px clamp(16px, 4vw, 48px) 48px;
+  font-family: var(--fuente);
+  color: var(--tinta);
+  background:
+    radial-gradient(1100px 620px at 12% -10%, #edf4ff 0%, rgba(237, 244, 255, 0) 60%),
+    radial-gradient(900px 560px at 92% 4%, #f1ecff 0%, rgba(241, 236, 255, 0) 55%),
+    var(--fondo);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Campo de estrellas: tres capas de puntos muy tenues, sin animación. */
+.cielo {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image:
+    radial-gradient(1.4px 1.4px at 18% 22%, #8ba4ff 45%, transparent 46%),
+    radial-gradient(1px 1px at 72% 14%, #b5a4ff 45%, transparent 46%),
+    radial-gradient(1.2px 1.2px at 44% 68%, #9dbbff 45%, transparent 46%),
+    radial-gradient(1px 1px at 86% 62%, #8ba4ff 45%, transparent 46%),
+    radial-gradient(1.6px 1.6px at 8% 84%, #b5a4ff 45%, transparent 46%);
+  background-size: 520px 520px, 680px 680px, 760px 760px, 900px 900px, 1100px 1100px;
+}
+
+/* ─── Cabecera ─────────────────────────────────────────────────────────── */
+
+.cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 1080px;
+  margin: 0 auto 28px;
+}
+
+.marca { display: flex; align-items: center; gap: 16px; }
+
+.marca-texto h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.marca-texto p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+/* Anillo orbital: gira al pensar, pulsa al hablar, quieto al escuchar. */
+.orbita {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0%, #e3ecff 48%, #c3d3ff 100%);
+  box-shadow: inset 0 0 12px rgba(61, 123, 253, 0.28),
+              0 10px 24px -14px rgba(61, 123, 253, 0.7);
+  flex: none;
+}
+
+.orbita::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--azul);
+  border-right-color: var(--violeta);
+  opacity: 0.6;
+}
+
+.orbita[data-estado="iniciando"]::after,
+.orbita[data-estado="pensando"]::after {
+  animation: girar 1.5s linear infinite;
+}
+
+.orbita[data-estado="escuchando"]::after {
+  animation: latir 3.2s ease-in-out infinite;
+  border-top-color: var(--menta);
+  border-right-color: var(--azul);
+}
+
+.orbita[data-estado="hablando"]::after {
+  animation: hablar 0.9s ease-in-out infinite;
+  border-top-color: var(--violeta);
+  border-right-color: var(--azul);
+}
+
+@keyframes girar { to { transform: rotate(360deg); } }
+
+@keyframes latir {
+  0%, 100% { transform: scale(0.96); opacity: 0.45; }
+  50% { transform: scale(1.04); opacity: 0.8; }
+}
+
+@keyframes hablar {
+  0%, 100% { transform: scale(0.95); opacity: 0.55; }
+  50% { transform: scale(1.06); opacity: 0.95; }
+}
+
+.pastilla {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 9px 16px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: var(--superficie);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--sombra-suave);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.pastilla-punto {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tinta-suave);
+  box-shadow: 0 0 0 4px rgba(91, 100, 120, 0.12);
+}
+
+.pastilla[data-estado="iniciando"] .pastilla-punto { background: var(--ambar); box-shadow: 0 0 0 4px rgba(224, 161, 0, 0.16); }
+.pastilla[data-estado="escuchando"] .pastilla-punto { background: var(--menta); box-shadow: 0 0 0 4px rgba(47, 191, 143, 0.16); }
+.pastilla[data-estado="pensando"] .pastilla-punto { background: var(--azul); box-shadow: 0 0 0 4px rgba(61, 123, 253, 0.16); }
+.pastilla[data-estado="hablando"] .pastilla-punto { background: var(--violeta); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18); }
+
+/* ─── Rejilla y tarjetas ───────────────────────────────────────────────── */
+
+.rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.tarjeta {
+  padding: 22px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  background: var(--superficie);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--sombra);
+}
+
+.tarjeta.ancha { grid-column: 1 / -1; }
+
+.tarjeta h2 {
+  margin: 0 0 16px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+/* ─── Botones ──────────────────────────────────────────────────────────── */
+
+.acciones {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.boton {
+  flex: 1;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+              transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+.boton:active:not(:disabled) { transform: translateY(1px); }
+
+.boton:focus-visible {
+  outline: 3px solid rgba(61, 123, 253, 0.45);
+  outline-offset: 2px;
+}
+
+.boton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.primario {
+  color: #fff;
+  background: linear-gradient(135deg, var(--azul), var(--indigo));
+  box-shadow: 0 12px 24px -14px rgba(61, 123, 253, 0.9);
+}
+
+.primario:hover:not(:disabled) { filter: brightness(1.06); }
+
+.peligro {
+  color: var(--coral);
+  background: rgba(229, 86, 106, 0.08);
+  border-color: rgba(229, 86, 106, 0.35);
+}
+
+.peligro:hover:not(:disabled) { background: rgba(229, 86, 106, 0.14); }
+
+.fantasma {
+  width: 100%;
+  color: var(--tinta);
+  background: var(--superficie-fuerte);
+  border-color: var(--borde-fuerte);
+}
+
+.fantasma:hover:not(:disabled) { border-color: var(--azul); color: var(--azul); }
+
+.nota {
+  margin: 12px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--tinta-suave);
+}
+
+/* ─── Chips de estado ──────────────────────────────────────────────────── */
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 0.9rem;
+}
+
+.chip-punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tinta-suave);
+  opacity: 0.5;
+  flex: none;
+}
+
+.chip-nombre { flex: 1; }
+
+.chip-valor {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--tinta-suave);
+}
+
+.chip[data-ok="true"] .chip-punto {
+  background: var(--menta);
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(47, 191, 143, 0.14);
+}
+
+.chip[data-ok="true"] .chip-valor { color: var(--menta); }
+
+.chip[data-ok="false"] .chip-punto {
+  background: var(--ambar);
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(224, 161, 0, 0.14);
+}
+
+.chip[data-ok="false"] .chip-valor { color: var(--ambar); }
+
+/* ─── Datos de la voz ──────────────────────────────────────────────────── */
+
+.datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.datos dt {
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+.datos dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+/* ─── Aviso de error ───────────────────────────────────────────────────── */
+
+.aviso {
+  max-width: 1080px;
+  margin: 20px auto 0;
+  padding: 14px 18px;
+  border: 1px solid rgba(229, 86, 106, 0.35);
+  border-radius: 12px;
+  background: rgba(229, 86, 106, 0.09);
+  color: #a92c3f;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* ─── Movimiento reducido ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .cielo { opacity: 0.2; }
+  .orbita::after { animation: none !important; }
+  .boton { transition: none; }
+}
+
+@media (max-width: 480px) {
+  .acciones { flex-direction: column; }
+  .marca-texto h1 { font-size: 1.35rem; }
+}
