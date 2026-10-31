@@ -5,9 +5,8 @@ Gestiona memoria y personalidad, y delega la generación de texto en cualquier
 implementación de LLMProvider. El cerebro no sabe si detrás hay Ollama o Gemini.
 """
 
-import os
-
-from core.idiomas import IDIOMA, Idioma
+from core import config
+from core.idiomas import Idioma, idioma_activo
 from core.llm_provider import LLMConfig, LLMProvider, Messages
 from core.ollama_adapter import OllamaAdapter
 
@@ -55,10 +54,10 @@ class NiuBrain:
                 elegido con `NIU_IDIOMA`.
         """
         self.provider = provider or OllamaAdapter(
-            model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_k_m"),
+            model=config.ajustes().modelo_llm,
         )
         self.ventana = ventana
-        self.idioma = idioma or IDIOMA
+        self.idioma = idioma or idioma_activo()
         self.mi_historial: Messages = []
 
     def _instruccion(self) -> str:
@@ -99,7 +98,7 @@ class NiuBrain:
             respuesta = await self.provider.generate(
                 messages=self.mi_historial,
                 system_instruction=self._instruccion(),
-                config=LLMConfig(temperature=0.9),
+                config=LLMConfig(temperature=config.ajustes().temperatura),
             )
             respuesta_texto = respuesta.text.strip()
         except Exception as e:
@@ -123,7 +122,7 @@ class NiuBrain:
             async for fragmento in self.provider.generate_stream(
                 messages=self.mi_historial,
                 system_instruction=self._instruccion(),
-                config=LLMConfig(temperature=0.9),
+                config=LLMConfig(temperature=config.ajustes().temperatura),
             ):
                 texto_completo += fragmento
                 yield fragmento

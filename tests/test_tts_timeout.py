@@ -18,7 +18,7 @@ import asyncio
 
 import pytest
 
-from core import tts
+from core import config, tts
 
 
 class ComunicadorFalso:
@@ -50,12 +50,17 @@ def tts_rapido(monkeypatch):
     """Deja el tope en décimas de segundo y cambia el comunicador por el doble."""
     import edge_tts
 
+    original = config.ajustes()
     monkeypatch.setattr(edge_tts, "Communicate", ComunicadorFalso)
-    monkeypatch.setattr(tts, "TIMEOUT_TTS", 0.2)
-    monkeypatch.setattr(tts, "INTENTOS_TTS", 2)
+    # El tope y los reintentos ya no son constantes del módulo: son ajustes.
+    # Se cambian por el mismo camino que usará el panel.
+    config.fijar_ajustes(config.con_cambios(tts_timeout=0.2, tts_intentos=2))
     ComunicadorFalso.llamadas = 0
     ComunicadorFalso.modo = "normal"
-    return ComunicadorFalso
+    try:
+        yield ComunicadorFalso
+    finally:
+        config.fijar_ajustes(original)
 
 
 @pytest.mark.asyncio

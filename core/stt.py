@@ -17,7 +17,7 @@ import numpy as np
 import sounddevice as sd
 import speech_recognition as sr
 
-from core.idiomas import IDIOMA
+from core import config
 from core.stt_provider import STTProvider, remuestrear
 
 SAMPLE_RATE = 16000      # Hz, formato que esperan los motores de STT
@@ -36,10 +36,8 @@ UMBRAL_MINIMO = 200.0    # RMS mínimo para considerar que hay voz
 # uno cree.
 #
 # 0,9 s es el equilibrio: se ahorra una décima respecto al original y aguanta
-# respiraciones. Si aún te corta, súbelo sin tocar código:
-#     $env:NIU_SILENCIO_FINAL = "1.1"
-SILENCIO_FINAL = float(os.getenv("NIU_SILENCIO_FINAL", "0.9"))
-
+# respiraciones. El valor vive en `Ajustes.silencio_final` y se puede cambiar
+# desde el panel; si aún te corta, súbelo ahí sin tocar código.
 FRASES_SALIDA = {"salir", "adiós", "adios", "terminar", "hasta luego"}
 
 
@@ -82,7 +80,7 @@ def _remuestrear_int16(datos: np.ndarray, fs_origen: int, fs_destino: int) -> np
 def grabar_hasta_silencio(
     dispositivo: int | None = None,
     timeout_inicio: float = 8.0,
-    silencio_final: float = SILENCIO_FINAL,
+    silencio_final: float | None = None,
     duracion_maxima: float = 15.0,
 ) -> bytes | None:
     """
@@ -104,6 +102,9 @@ def grabar_hasta_silencio(
     Returns:
         Bytes PCM 16-bit mono a 16 kHz, o None si no se detectó voz a tiempo.
     """
+    if silencio_final is None:
+        silencio_final = config.ajustes().silencio_final
+
     info = (sd.query_devices(kind="input") if dispositivo is None
             else sd.query_devices(dispositivo))
     fs_dispositivo = int(info["default_samplerate"])
@@ -178,33 +179,35 @@ def reconocer(audio_pcm: bytes, idioma: str = "es-MX") -> str | None:
 def idioma_stt() -> str | None:
     """Idioma que se le pide al reconocedor de voz, o None para automático.
 
-    Por defecto **sigue al perfil** (`NIU_IDIOMA`). Si Niu va a contestar en
-    inglés, el oído tiene que esperar inglés: dejarlo en automático era el
-    fallo, porque con una frase corta y un prompt en español Whisper "oía"
-    español aunque se le hablara en inglés. Niu respondía entonces a una
+    Por defecto **sigue al perfil** de los ajustes activos. Si Niu va a
+    contestar en inglés, el oído tiene que esperar inglés: dejarlo en automático
+    era el fallo, porque con una frase corta y un prompt en español Whisper
+    "oía" español aunque se le hablara en inglés. Niu respondía entonces a una
     transcripción que no era lo que se había dicho.
 
     `NIU_STT_IDIOMA` fuerza otro idioma, o `auto` para volver a la detección
     automática (útil si de verdad alternas idiomas en la misma sesión, a
-    sabiendas de que el prompt del perfil sigue sesgando la detección).
+    sabiendas de que el prompt del perfil sigue sesgando la detección). Se deja
+    como variable de entorno, no como ajuste del panel: es una salida de
+    emergencia, no parte del uso normal.
     """
     pedido = os.getenv("NIU_STT_IDIOMA", "").strip().lower()
     if pedido == "auto":
         return None
-    return pedido or IDIOMA.codigo
+    return pedido or config.ajustes().idioma
 
 
 def crear_proveedor_stt() -> STTProvider:
     """
-    Crea el motor de reconocimiento configurado en el .env.
+    Crea el motor de reconocimiento configurado en los ajustes.
 
-    NIU_STT = whisper | gemini
+    `motor_stt` = whisper | gemini
         whisper : local, sin internet ni cuotas (necesita buen audio de entrada)
         gemini  : nube, muy robusto con audio difícil (necesita GOOGLE_API_KEY)
 
-    NIU_STT_IDIOMA = es | en | auto (por defecto, el idioma del perfil)
+    `NIU_STT_IDIOMA` = es | en | auto (por defecto, el idioma del perfil)
     """
-    motor = os.getenv("NIU_STT", "whisper").strip().lower()
+    motor = config.ajustes().motor_stt
     idioma = idioma_stt()
 
     if motor == "gemini":

@@ -26,6 +26,7 @@
 Vtuber IA odyssey/
 ├── core/
 │   ├── __init__.py
+│   ├── config.py          # Ajustes tipados: validación, config.json y valores por defecto
 │   ├── brain.py           # Memoria + personalidad + llamada a LLMProvider
 │   ├── llm_provider.py    # Interfaz común (Protocol) + LLMConfig/LLMResponse
 │   ├── ollama_adapter.py  # Implementación local vía /api/chat
@@ -45,6 +46,7 @@ Vtuber IA odyssey/
 ├── tests/                 # pytest: lógica que puede romperse en silencio
 ├── requirements.txt
 ├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
+├── config.json            # Ajustes editables desde el panel (no versionado)
 ├── vts_token.txt          # Token VTS persistente (no versionado)
 ├── test_audio.py          # Script auxiliar para listar salidas de audio
 └── dia_por_dia/           # Historial de aprendizaje
@@ -184,21 +186,48 @@ GOOGLE_API_KEY=tu_api_key
 
 ### Variables que cambian el comportamiento sin tocar código
 
-| variable | por defecto | para qué |
-|---|---|---|
-| `NIU_IDIOMA` | `es` | perfil de idioma: voz, tono, reglas de estilo y prompt del STT (`es`, `en`) |
-| `NIU_VOZ` | la del perfil | forzar una voz concreta de Edge-TTS |
-| `NIU_TONO` | la del perfil (`+0Hz`) | forzar el tono de Edge-TTS (`-25Hz`) |
-| `NIU_SALIDA` | dispositivo de Windows | forzar el dispositivo de salida de la voz |
-| `NIU_MIC` | `DGM20 USB Microphone` | nombre del micrófono |
-| `NIU_SILENCIO_FINAL` | `0.9` | silencio que hay que oír para cortar la frase |
-| `NIU_STT_IDIOMA` | el del perfil | forzar el idioma del STT (`en`, `es`); `auto` = detección automática |
-| `NIU_STT_PROMPT` | el del perfil | contexto que se le da al decoder de Whisper |
-| `NIU_WHISPER_MODELO` | `large-v3-turbo` | modelo de Whisper |
-| `NIU_WHISPER_BEAM` | `1` | hipótesis del decodificador (más = más calidad y más lento) |
-| `NIU_TTS_TIMEOUT` | `15` | segundos antes de rendirse con una frase |
-| `NIU_TTS_INTENTOS` | `2` | reintentos de Edge-TTS |
-| `NIU_OLLAMA_KEEP_ALIVE` | `30m` | cuánto mantiene Ollama el modelo en memoria |
+Desde la fase 0 del panel, los ajustes viven en **`core/config.py`** como un
+objeto `Ajustes` congelado, no como constantes de importación. La precedencia es:
+
+```text
+config.json  >  variables de entorno  >  valores de fábrica
+```
+
+El JSON gana porque es lo que escribe el panel; las variables siguen aceptándose
+para no romper el `.env` y los scripts que ya existen. `core/config.py` carga
+`.env` por su cuenta (sin pisar lo que ya esté en el entorno), así que la consola
+y el panel leen lo mismo. Los valores se leen **al usarlos**, no al importar el
+módulo, así que un cambio en el panel surte efecto en la siguiente frase o el
+siguiente turno. Un cambio en caliente no puede tocar lo que ya está cargado
+(modelo en GPU, voz de un audio ya sintetizado): esos campos se marcan en la
+interfaz como «se aplica al reiniciar el motor».
+
+| variable | por defecto | para qué | editable en el panel |
+|---|---|---|---|
+| `NIU_IDIOMA` | `es` | perfil de idioma: voz, tono, reglas de estilo y prompt del STT (`es`, `en`) | sí |
+| `NIU_VOZ` | la del perfil | forzar una voz concreta de Edge-TTS | sí |
+| `NIU_TONO` | la del perfil (`+0Hz`) | forzar el tono de Edge-TTS (`-25Hz`) | sí |
+| `NIU_VELOCIDAD` | `+0%` | ritmo de habla de Edge-TTS (`-8%`, `+10%`) | sí |
+| `NIU_SALIDA` | dispositivo de Windows | forzar el dispositivo de salida de la voz | sí |
+| `NIU_MIC` | `DGM20 USB Microphone` | nombre del micrófono | sí |
+| `NIU_SILENCIO_FINAL` | `0.9` | silencio que hay que oír para cortar la frase | sí |
+| `OLLAMA_MODEL` | `qwen2.5:7b-instruct-q4_k_m` | modelo de Ollama | sí |
+| `NIU_STT` | `whisper` | motor de reconocimiento (`whisper`, `gemini`) | sí |
+| `NIU_WHISPER_MODELO` | `large-v3-turbo` | modelo de Whisper | sí |
+| `NIU_STT_IDIOMA` | el del perfil | forzar el idioma del STT (`en`, `es`); `auto` = detección automática | no (salida de emergencia) |
+| `NIU_STT_PROMPT` | el del perfil | contexto que se le da al decoder de Whisper | no (se deriva del perfil) |
+| `NIU_WHISPER_BEAM` | `1` | hipótesis del decodificador (más = más calidad y más lento) | no |
+| `NIU_TTS_TIMEOUT` | `15` | segundos antes de rendirse con una frase | avanzado |
+| `NIU_TTS_INTENTOS` | `2` | reintentos de Edge-TTS | avanzado |
+| `NIU_TEMPERATURA` | `0.9` | creatividad del LLM | avanzado |
+| `NIU_OLLAMA_KEEP_ALIVE` | `30m` | cuánto mantiene Ollama el modelo en memoria | no |
+
+Los secretos (`GOOGLE_API_KEY`, `vts_token.txt`) **no** están en `config.json` ni
+se exponen en la interfaz: solo se indica si están configurados o no.
+
+Los valores absurdos se corrigen y se avisan (`[CONFIG] ...`) en vez de romper
+el arranque: un `silencio_final` de 99 s se queda en 3 s, un `tono` sin unidad
+vuelve al del perfil y un `config.json` corrupto se ignora entero.
 
 ---
 
@@ -514,6 +543,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Medir en vez de suponer**: para saber si un mapeo existe, se inyecta 0 y 1 y se mira si la boca se mueve. Leer el archivo de configuración habría dado falsos negativos.
 - **Un servicio puede contestar solo una vez por frame**: VTS responde en su siguiente frame de render, así que cada petición cuesta 16,7 ms aunque sea local. Eso fija el techo de peticiones por segundo.
 - **`asyncio.sleep` no tiene precisión de milisegundos en Windows**: se despierta en múltiplos de 15,6 ms. Un bucle que dependa de dormir "16 ms" se retrasa el doble. Se arregla con `timeBeginPeriod(1)` de WinMM, o midiendo y compensando.
+- **Configuración como dato, no como constante de importación**: leer `os.getenv` al importar hace que un cambio en caliente no tenga efecto. Un objeto `Ajustes` congelado, leído en el momento de usarlo y validado al entrar, permite que la interfaz cambie valores sin reiniciar Python y sin dejar el estado a medio cambiar.
+- **Un valor inválido se avisa, no se ignora**: corregir en silencio un tono mal escrito o un silencio de 99 s es peor que rechazarlo, porque el usuario cree que aplicó lo que pidió.
 - **Reloj absoluto en vez de esperas relativas**: si cada frame se programa como `inicio + i/fps` en lugar de "dormir 25 ms", un retraso puntual no se convierte en desfase acumulado.
 - **Suavizado asimétrico**: abrir rápido y cerrar despacio es lo que diferencia una boca de un vúmetro.
 - **Definiciones duplicadas en Python**: si un método se define dos veces en la misma clase, la segunda sustituye a la primera sin avisar; el código anterior queda muerto y engaña al leerlo.
@@ -549,7 +580,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 ## 🚧 Deuda técnica conocida
 
 - Falta `GeminiAdapter` para volver a usar la nube.
-- Configuración pendiente de migrar a settings tipados.
+- Los scripts sueltos de la raíz (`probar_entrada_voz.py`, `prueba_de_voz.py`, `diagnostico_mic.py`, `dia_por_dia/*`) siguen leyendo `os.getenv` directamente: no se migraron porque son herramientas de diagnóstico, no el motor.
+- Varias variables se leen al construir un objeto (modelo de Whisper, `keep_alive`) y no pueden cambiar en caliente: por eso el plan del panel las marca como «se aplica al reiniciar el motor».
 - Logging profesional pendiente.
 - Tests unitarios pendientes del cerebro y del adaptador LLM (la envolvente del lip sync, el corte de frases y el tope de tiempo del TTS ya los tienen en `tests/`).
 - Interrupción de TTS pendiente (barge-in).

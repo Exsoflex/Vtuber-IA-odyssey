@@ -54,8 +54,9 @@ Y la voz concreta se puede forzar aparte, por si quieres probar otra:
     $env:NIU_VOZ = "en-US-AvaNeural"
 """
 
-import os
 from dataclasses import dataclass
+
+from core import config
 
 
 @dataclass(frozen=True)
@@ -157,16 +158,35 @@ def elegir_idioma(codigo: str | None = None) -> Idioma:
     `NIU_IDIOMA` y reimportar el módulo en un test es frágil, mientras que
     llamar a esta función con "en" o con "fr" es trivial.
 
+    Sin argumento usa el idioma de los ajustes activos, no una instantánea de
+    importación: es lo que permite que cambiar de idioma desde el panel surta
+    efecto sin reiniciar Python.
+
     Un código desconocido cae en español en vez de romper el arranque: un
     error de tecleo en una variable de entorno no debe dejar a Niu muda.
     """
-    return IDIOMAS.get((codigo or CODIGO_IDIOMA).strip().lower(), ESPANOL)
+    elegido = (codigo or config.ajustes().idioma).strip().lower()
+    return IDIOMAS.get(elegido, ESPANOL)
 
 
-# Idioma activo. `es` mantiene el comportamiento que ya conoces; para contenido
-# en inglés, NIU_IDIOMA=en.
-CODIGO_IDIOMA = os.getenv("NIU_IDIOMA", "es").strip().lower()
-IDIOMA = elegir_idioma(CODIGO_IDIOMA)
+def idioma_activo() -> Idioma:
+    """Perfil que toca ahora mismo, según los ajustes."""
+    return elegir_idioma(config.ajustes().idioma)
 
-# Voz efectiva: la del perfil, salvo que se fuerce con NIU_VOZ.
-VOZ = os.getenv("NIU_VOZ", "").strip() or IDIOMA.voz
+
+def voz_activa() -> str:
+    """Voz que toca: la forzada en los ajustes o la del perfil."""
+    return config.ajustes().voz or idioma_activo().voz
+
+
+def tono_activo() -> str:
+    """Tono que toca: el forzado en los ajustes o el del perfil."""
+    return config.ajustes().tono or idioma_activo().tono
+
+
+# Instantánea de arranque, por compatibilidad con el código que ya importaba
+# estas constantes. El código nuevo llama a las funciones de arriba, que sí ven
+# los cambios hechos desde el panel.
+CODIGO_IDIOMA = config.ajustes().idioma
+IDIOMA = idioma_activo()
+VOZ = voz_activa()

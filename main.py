@@ -14,10 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core import tts
+from core import config
 from core.audio_devices import buscar_dispositivo
 from core.brain import NiuBrain
-from core.idiomas import IDIOMA
+from core.idiomas import idioma_activo, tono_activo, voz_activa
 from core.stt import (
     FRASES_SALIDA,
     SAMPLE_RATE,
@@ -34,13 +34,9 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 # Micrófono físico de Héctor. Importante: NO usar "Voicemeeter Out B1", porque
 # ese bus lleva la voz de Niu y el audio del sistema (Niu se oiría a sí misma).
 # Si prefieres pasar tu voz por Voicemeeter, enruta HARDWARE IN 1 a B2 y pon
-# NIU_MIC="Voicemeeter Out B2" en el .env.
-DISPOSITIVO_ENTRADA = os.getenv("NIU_MIC", "DGM20 USB Microphone")
-
-# Idioma que se le pide al oído. Por defecto el del perfil (NIU_IDIOMA), para
-# que escuchar y contestar apunten al mismo idioma; "auto" vuelve a la
-# detección automática del motor.
-IDIOMA_STT = idioma_stt()
+# `microfono` = "Voicemeeter Out B2" en los ajustes.
+# El nombre se lee de `core/config.py` al arrancar, no al importar: así el panel
+# puede cambiarlo y el siguiente arranque del motor ya usa el nuevo.
 
 
 async def _mostrando_el_texto(fragmentos):
@@ -113,12 +109,13 @@ def mostrar_tiempos(t: dict[str, float]) -> None:
     )
 
 
-async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
+async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt,
+                             nombre_mic: str = ""):
     """Bucle de conversación continua."""
     if dispositivo_mic is None:
         print("[AVISO] Sin micrófono. Usando teclado.")
     else:
-        print(f"[MIC] Escuchando en {DISPOSITIVO_ENTRADA}. Di 'salir' para terminar.")
+        print(f"[MIC] Escuchando en {nombre_mic}. Di 'salir' para terminar.")
 
     while True:
         try:
@@ -133,7 +130,7 @@ async def bucle_conversacion(brain: NiuBrain, dispositivo_mic: int | None, stt):
                 # el proveedor espera un array de numpy.
                 muestras = np.frombuffer(audio, dtype=np.int16)
                 inicio = time.perf_counter()
-                texto = await stt.transcribir(muestras, SAMPLE_RATE, IDIOMA_STT)
+                texto = await stt.transcribir(muestras, SAMPLE_RATE, idioma_stt())
                 tiempos["stt"] = time.perf_counter() - inicio
                 ms = tiempos["stt"] * 1000
                 if not texto:
@@ -163,10 +160,11 @@ async def main():
     brain = NiuBrain()
 
     # El perfil de idioma decide voz, tono y reglas de estilo. Se imprime
-    # porque, si alguien olvidó cambiar NIU_IDIOMA, es mejor verlo al arrancar
+    # porque, si alguien olvidó cambiar el idioma, es mejor verlo al arrancar
     # que descubrirlo cuando Niu contesta en el idioma equivocado.
-    print(f"[IDIOMA] Perfil: {IDIOMA.nombre} ({IDIOMA.codigo}) | "
-          f"voz: {tts.VOZ_NIU} | tono: {tts.TONO}")
+    perfil = idioma_activo()
+    print(f"[IDIOMA] Perfil: {perfil.nombre} ({perfil.codigo}) | "
+          f"voz: {voz_activa()} | tono: {tono_activo()}")
 
     # Cargar el modelo ahora, no en mitad de la primera frase. Es opcional:
     # si el proveedor no lo soporta o falla, se sigue igual.
@@ -183,9 +181,10 @@ async def main():
         print(f"[WARN] [Aviso VTS]: No se pudo conectar ({e}). Continuando en modo solo consola.")
 
     # 3. Localizar el micrófono
-    dispositivo_mic = buscar_dispositivo(DISPOSITIVO_ENTRADA, salida=False)
+    nombre_mic = config.ajustes().microfono
+    dispositivo_mic = buscar_dispositivo(nombre_mic, salida=False)
     if dispositivo_mic is None:
-        print(f"[WARN] No encontré '{DISPOSITIVO_ENTRADA}'. Revisa Voicemeeter.")
+        print(f"[WARN] No encontré '{nombre_mic}'. Revisa el nombre en los ajustes.")
 
     # 4. Motor de reconocimiento de voz (independiente del proveedor)
     stt = None
@@ -202,7 +201,7 @@ async def main():
 
     print("\n🎙️ Niu está lista.\n")
     try:
-        await bucle_conversacion(brain, dispositivo_mic, stt)
+        await bucle_conversacion(brain, dispositivo_mic, stt, nombre_mic)
     finally:
         await vts_client.close()
         cerrar = getattr(brain.provider, "close", None)

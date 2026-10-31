@@ -1,4 +1,8 @@
 .env
+# Ajustes locales (los escribe el panel). Cada máquina tiene los suyos y el
+# archivo puede acabar conteniendo nombres de dispositivos de audio.
+config.json
+config.json.tmp
 .venv/
 __pycache__/
 *.pyc

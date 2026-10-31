@@ -362,7 +362,7 @@ async def animar_boca(boca: list[float], parametro: str | None = None,
 async def sintetizar_y_preparar(
     texto: str,
     archivo_audio: str = "core/voz_temp.mp3",
-    voz: str = tts.VOZ_NIU,
+    voz: str | None = None,
     medidas: dict[str, float] | None = None,
 ) -> tts.AudioPreparado | None:
     """Convierte texto en audio listo para sonar (y ya medido, para la boca).
@@ -446,7 +446,7 @@ async def decir(audio: tts.AudioPreparado, etiqueta: str = "") -> int:
 async def hablar_con_lipsync(
     texto: str,
     archivo_audio: str = "core/voz_temp.mp3",
-    voz: str = tts.VOZ_NIU,
+    voz: str | None = None,
     medidas: dict[str, float] | None = None,
 ) -> bool:
     """Dice una frase entera de una vez, sin streaming.
@@ -472,7 +472,7 @@ async def hablar_con_lipsync(
 async def hablar_por_partes(
     fragmentos: AsyncIterator[str],
     archivo_audio: str = "core/voz_temp.mp3",
-    voz: str = tts.VOZ_NIU,
+    voz: str | None = None,
     medidas: dict[str, float] | None = None,
 ) -> str:
     """Habla mientras el texto todavía se está escribiendo.

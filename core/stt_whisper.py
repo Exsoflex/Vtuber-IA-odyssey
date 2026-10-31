@@ -23,7 +23,8 @@ import os
 
 import numpy as np
 
-from core.idiomas import IDIOMA, IDIOMAS
+from core import config
+from core.idiomas import IDIOMAS, elegir_idioma
 from core.stt_provider import normalizar_pico, pcm_a_float, remuestrear
 
 FS_MODELO = 16000   # Whisper trabaja internamente a 16 kHz
@@ -59,7 +60,7 @@ class WhisperSTT:
         prompt: str | None = None,
         idioma: str | None = None,
     ) -> None:
-        self.modelo_nombre = modelo or os.getenv("NIU_WHISPER_MODELO", "large-v3-turbo")
+        self.modelo_nombre = modelo or config.ajustes().modelo_whisper
         self.dispositivo = (dispositivo or os.getenv("NIU_WHISPER_DISPOSITIVO", "auto")).lower()
         self.hilos = hilos or int(os.getenv("NIU_WHISPER_HILOS", "0")) or None
 
@@ -95,7 +96,7 @@ class WhisperSTT:
         apuntan al mismo sitio aunque la detección quede desactivada.
         """
         if self.idioma is None:
-            return IDIOMA
+            return elegir_idioma(config.ajustes().idioma)
         return IDIOMAS.get(self.idioma.strip().lower())
 
     # ------------------------------------------------------------------
@@ -133,7 +134,7 @@ class WhisperSTT:
         try:
             list(self._modelo.transcribe(
                 np.zeros(FS_MODELO, dtype=np.float32),
-                language=self.idioma or IDIOMA.codigo,
+                language=self.idioma or config.ajustes().idioma,
                 beam_size=1,
             )[0])
         except Exception as e:

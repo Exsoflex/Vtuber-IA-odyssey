@@ -24,8 +24,9 @@ from dataclasses import dataclass
 import numpy as np
 from dotenv import load_dotenv
 
+from core import config
 from core.audio_devices import buscar_dispositivo, buscar_salida_por_defecto
-from core.idiomas import IDIOMA, VOZ
+from core.idiomas import tono_activo, voz_activa
 
 load_dotenv()
 
@@ -50,33 +51,23 @@ except ImportError:
           "Instala con: pip install sounddevice soundfile")
 
 # ─── Configuración de voz ──────────────────────────────────────────────
-# La voz la decide el perfil de idioma (core/idiomas.py): una voz española
-# leyendo inglés suena a española leyendo inglés. `NIU_VOZ` la fuerza sin tocar
-# código, y `NIU_IDIOMA` cambia de perfil.
-VOZ_NIU = VOZ
-VELOCIDAD = "+0%"              # Velocidad normal
-# Edge-TTS usa hercios para el tono, no porcentaje. El valor sale del perfil:
-# en inglés Aria va ligeramente más grave para quitarle brillo.
-TONO = os.getenv("NIU_TONO", "").strip() or IDIOMA.tono
-
+# Nada de esto es una constante de importación: la voz, el tono, el ritmo y el
+# dispositivo se leen de `core/config.py` en el momento de usarlos. Así el panel
+# puede cambiarlos y la siguiente frase ya sale distinta, sin reiniciar Python.
 TARGET_SAMPLE_RATE = 48000  # Hz; se remuestrea aquí para no depender del endpoint
 
 # Salida de voz.
 #
-# Por defecto (sin variable de entorno) Niu suena donde suena Windows: se coge
-# el dispositivo de salida predeterminado del sistema y se busca ese mismo
+# Por defecto (sin `salida` en los ajustes) Niu suena donde suena Windows: se
+# coge el dispositivo de salida predeterminado del sistema y se busca ese mismo
 # dispositivo en el mejor backend disponible. Así no queda clavado al hardware
 # de este equipo: si el usuario cambia de auriculares, Niu se muda con él.
-#
-# Para forzar otro dispositivo, variable de entorno:
-#     $env:NIU_SALIDA = "Voicemeeter Input"
 #
 # Historia: antes la voz iba a "Voicemeeter Input" para que VTube Studio la
 # escuchara por el cable virtual y moviera la boca. Ese camino se abandonó (ver
 # core/lipsync.py): ahora la boca la mueve Niu a partir de su propia onda, así
 # que el audio puede ir directo a los auriculares. Un salto menos, menos
 # latencia y una pieza menos que puede romperse.
-DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA") or None
 
 # Tope de tiempo por síntesis, y cuántas veces se reintenta.
 #
@@ -86,9 +77,8 @@ DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA") or None
 # esperando más de 5 minutos dentro de `comunicador.save()`.
 #
 # Perder una frase es molesto; quedarse mudo del todo es peor. Con un tope, el
-# turno sigue: la parte que falló se salta y el resto se dice igual.
-TIMEOUT_TTS = float(os.getenv("NIU_TTS_TIMEOUT", "15"))
-INTENTOS_TTS = int(os.getenv("NIU_TTS_INTENTOS", "2"))
+# turno sigue: la parte que falló se salta y el resto se dice igual. Los valores
+# viven en `Ajustes` (`tts_timeout`, `tts_intentos`) y se leen por llamada.
 
 
 @dataclass
@@ -196,18 +186,24 @@ def _limpiar_texto_para_tts(texto: str) -> str:
 async def sintetizar_voz_async(
     texto: str,
     archivo_salida: str = "core/voz_temp.mp3",
-    voz: str = VOZ_NIU,
+    voz: str | None = None,
 ) -> bool:
     """Sintetiza texto a audio con Edge-TTS y lo guarda en disco.
 
     Args:
         texto: Texto a sintetizar (puede contener emojis).
         archivo_salida: Ruta del archivo de audio temporal.
-        voz: Nombre de la voz de Edge-TTS a utilizar.
+        voz: Nombre de la voz de Edge-TTS. None = la de los ajustes activos
+            (que a su vez puede ser la del perfil de idioma).
 
     Returns:
         True si el archivo se generó y no está vacío.
     """
+    ajustes = config.ajustes()
+    voz = voz or voz_activa()
+    velocidad = ajustes.velocidad
+    tono = tono_activo()
+
     try:
         print("🎙️ [TTS Edge]: Niu está preparando su voz...")
 
@@ -225,27 +221,28 @@ async def sintetizar_voz_async(
         comunicador = edge_tts.Communicate(
             text=texto_para_tts,
             voice=voz,
-            rate=VELOCIDAD,
-            pitch=TONO,
+            rate=velocidad,
+            pitch=tono,
         )
 
         os.makedirs(os.path.dirname(archivo_salida), exist_ok=True)
 
         # Se crea un comunicador nuevo en cada intento: `save()` consume el
         # comunicador, así que reutilizarlo tras un fallo no funcionaría.
-        for intento in range(1, INTENTOS_TTS + 1):
+        for intento in range(1, ajustes.tts_intentos + 1):
             if intento > 1:
                 comunicador = edge_tts.Communicate(
-                    text=texto_para_tts, voice=voz, rate=VELOCIDAD, pitch=TONO
+                    text=texto_para_tts, voice=voz, rate=velocidad, pitch=tono
                 )
             try:
                 await asyncio.wait_for(comunicador.save(archivo_salida),
-                                       timeout=TIMEOUT_TTS)
+                                       timeout=ajustes.tts_timeout)
                 break
             except asyncio.TimeoutError:
-                print(f"[WARN] [TTS Edge] Sin respuesta en {TIMEOUT_TTS:.1f} s "
-                      f"(intento {intento}/{INTENTOS_TTS})")
-                if intento == INTENTOS_TTS:
+                print(f"[WARN] [TTS Edge] Sin respuesta en "
+                      f"{ajustes.tts_timeout:.1f} s "
+                      f"(intento {intento}/{ajustes.tts_intentos})")
+                if intento == ajustes.tts_intentos:
                     print("[WARN] [TTS Edge] Se salta esta frase")
                     return False
 
@@ -358,7 +355,7 @@ def reproducir_audio(audio: AudioPreparado) -> None:
 async def sintetizar_y_reproducir_voz_async(
     texto: str,
     archivo_salida: str = "core/voz_temp.mp3",
-    voz: str = VOZ_NIU,
+    voz: str | None = None,
 ) -> bool:
     """Genera y reproduce una frase, sin lip sync.
 
@@ -384,14 +381,16 @@ async def sintetizar_y_reproducir_voz_async(
 def _buscar_dispositivo_salida() -> int | None:
     """Busca el dispositivo de salida de audio.
 
-    Sin `NIU_SALIDA` en el entorno devuelve el que Windows tenga por defecto;
-    con ella, el primero cuyo nombre contenga ese texto.
+    Sin `salida` en los ajustes devuelve el que Windows tenga por defecto; con
+    ella, el primero cuyo nombre contenga ese texto. Se lee por llamada, así
+    que cambiarla desde el panel afecta a la siguiente frase.
     """
     if not SOUNDDEVICE_AVAILABLE:
         return None
-    if not DISPOSITIVO_SALIDA:
+    nombre = config.ajustes().salida
+    if not nombre:
         return buscar_salida_por_defecto()
-    return buscar_dispositivo(DISPOSITIVO_SALIDA, salida=True)
+    return buscar_dispositivo(nombre, salida=True)
 
 
 def _remuestrear_audio(data, fs_origen: int, fs_objetivo: int):

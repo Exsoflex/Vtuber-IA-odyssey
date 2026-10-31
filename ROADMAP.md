@@ -222,7 +222,7 @@ Y faltaba la otra mitad de la tubería: **el oído**. El perfil elegía qué dec
 
 | Tarea | Descripción |
 |-------|-------------|
-| Config tipada | Migrar `.env` a settings tipados (lo resuelve la fase 0 del panel, ver `PLAN_PANEL.md`) |
+| Config tipada | `core/config.py`: objeto `Ajustes` congelado, `config.json`, precedencia JSON > entorno > defecto y 26 tests propios (fase 0 del panel) | ✅ |
 | Logging profesional | Niveles, formato estructurado, rotación |
 | Tests unitarios | Memoria, poda, proveedor LLM y VTube Studio |
 | Type checking | `mypy` + `ruff` |
@@ -237,7 +237,7 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 
 | Tarea | Descripción | Estado |
 |-------|-------------|--------|
-| Ajustes tipados | `core/config.py`: un solo objeto validado, `config.json` y valores por defecto | ⚠️ pendiente |
+| Ajustes tipados | `core/config.py`: un solo objeto validado, `config.json` y valores por defecto | ✅ |
 | Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ⚠️ pendiente |
 | Panel mínimo | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar y estado | ⚠️ pendiente |
 | Vista de chat | Transcripción, texto de Niu en streaming y métricas por turno | ⚠️ pendiente |
