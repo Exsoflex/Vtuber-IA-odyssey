@@ -3,6 +3,8 @@
 # archivo puede acabar conteniendo nombres de dispositivos de audio.
 config.json
 config.json.tmp
+# Conversaciones guardadas por el panel: son datos del usuario, no del repo.
+sesiones/
 .venv/
 __pycache__/
 *.pyc

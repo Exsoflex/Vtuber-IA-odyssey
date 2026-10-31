@@ -12,6 +12,7 @@ habla, graba mientras hablas y corta tras un segundo de silencio.
 """
 
 import os
+import threading
 
 import numpy as np
 import sounddevice as sd
@@ -82,6 +83,7 @@ def grabar_hasta_silencio(
     timeout_inicio: float = 8.0,
     silencio_final: float | None = None,
     duracion_maxima: float = 15.0,
+    cancelar: threading.Event | None = None,
 ) -> bytes | None:
     """
     Graba desde el micrófono hasta detectar silencio.
@@ -99,9 +101,27 @@ def grabar_hasta_silencio(
        a 1 canal, Whisper no transcribía; a 2 canales, transcribía a la primera.
        Por eso se abre con los canales nativos y el canal se elige en Python.
 
+    `cancelar` existe para el chat: si el usuario escribe mientras Niu espera
+    al micrófono, no tiene sentido seguir grabando hasta el timeout. La señal
+    se comprueba entre bloques (cada 100 ms), así que la grabación termina
+    rápido y sin cerrar el dispositivo a medias.
+
+    Args:
+        dispositivo, timeout_inicio, silencio_final, duracion_maxima: ver arriba.
+        cancelar: evento que se activa desde otro hilo para abandonar la
+            grabación. Es un `threading.Event` y no una corrutina porque esta
+            función corre en un hilo aparte (`asyncio.to_thread`).
+
     Returns:
-        Bytes PCM 16-bit mono a 16 kHz, o None si no se detectó voz a tiempo.
+        Bytes PCM 16-bit mono a 16 kHz, o None si no se detectó voz a tiempo o
+        si se canceló.
     """
+    def cancelado() -> bool:
+        return cancelar is not None and cancelar.is_set()
+
+    if cancelado():
+        return None
+
     if silencio_final is None:
         silencio_final = config.ajustes().silencio_final
 
@@ -130,6 +150,8 @@ def grabar_hasta_silencio(
         # 1. Esperar a que empiece el habla
         inicio = None
         for _ in range(bloques_espera):
+            if cancelado():
+                return None
             bloque, _ = stream.read(tam_bloque)
             if _rms(_a_mono(bloque, canal)) > umbral:
                 inicio = _a_mono(bloque, canal).copy()
@@ -142,6 +164,8 @@ def grabar_hasta_silencio(
         partes = [inicio]
         silencio_acumulado = 0
         for _ in range(bloques_maximos):
+            if cancelado():
+                return None
             bloque, _ = stream.read(tam_bloque)
             mono = _a_mono(bloque, canal)
             partes.append(mono.copy())

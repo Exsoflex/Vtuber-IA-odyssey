@@ -49,6 +49,36 @@
       </ul>
     </section>
 
+    <section class="tarjeta ancha chat" aria-labelledby="t-chat">
+      <div class="chat-cabecera">
+        <h2 id="t-chat">Conversación</h2>
+        <div class="chat-botones">
+          <button type="button" class="boton-mini" id="btn-copiar"
+                  title="Copiar la conversación como texto">Copiar</button>
+          <button type="button" class="boton-mini" id="btn-exportar"
+                  title="Descargar la sesión en Markdown">Exportar .md</button>
+          <button type="button" class="boton-mini peligro-mini" id="btn-limpiar"
+                  title="Empezar una sesión nueva">Limpiar</button>
+        </div>
+      </div>
+
+      <div class="chat-registro" id="chat-registro" role="log" aria-live="polite"
+           aria-label="Conversación con Niu">
+        <p class="chat-vacio" id="chat-vacio">Inicia el motor y háblale, o escribe abajo.</p>
+      </div>
+
+      <form class="chat-form" id="chat-form">
+        <label class="oculto" for="chat-entrada">Mensaje para Niu</label>
+        <input class="chat-entrada" id="chat-entrada" type="text" autocomplete="off"
+               placeholder="Inicia el motor para escribir" maxlength="2000" disabled>
+        <button type="submit" class="boton primario chat-enviar" id="btn-enviar" disabled>
+          Enviar
+        </button>
+      </form>
+
+      <p class="nota chat-nota" id="chat-nota">La sesión se guarda en <code>sesiones/</code>.</p>
+    </section>
+
     <section class="tarjeta ancha" aria-labelledby="t-voz">
       <h2 id="t-voz">Voz activa</h2>
       <dl class="datos">

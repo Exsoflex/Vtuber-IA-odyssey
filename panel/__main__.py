@@ -10,10 +10,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 import uvicorn
 
 from panel.app import crear_app
+
+# Como en `main.py`: la consola de Windows necesita UTF-8 explícito para los
+# emojis y los acentos, y sin buffering para que los avisos del motor aparezcan
+# en el momento en que ocurren (y no en bloqueos de 8 KB).
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 
 def main() -> None:

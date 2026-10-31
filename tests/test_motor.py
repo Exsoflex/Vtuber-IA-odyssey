@@ -16,6 +16,7 @@ Ejecutar:
 """
 
 import asyncio
+import time
 
 import pytest
 
@@ -76,15 +77,16 @@ class MotorDePrueba(MotorNiu):
     async def _cerrar_vts(self) -> None:
         self.vts_conectado = False
 
-    async def _hablar(self, texto: str, tiempos: dict[str, float]) -> None:
+    async def _hablar(self, texto: str, tiempos: dict[str, float],
+                      turno: int = 0) -> None:
         """Turno instantáneo: sin Edge-TTS ni audio, pero con el stream real."""
         self.hablado.append(texto)
         self._cambiar_estado(HABLANDO)
-        async for _ in self._fragmentos(texto):
+        async for _ in self._fragmentos(texto, turno):
             pass
         await asyncio.sleep(0)      # deja hueco a una cancelación
-        self._emitir("respuesta", texto="hola")
-        self._emitir("metricas", tiempos=dict(tiempos))
+        self._emitir("respuesta", texto="hola", turno=turno)
+        self._emitir("metricas", tiempos=dict(tiempos), turno=turno)
 
 
 class MotorQueHablaSinParar(MotorDePrueba):
@@ -94,7 +96,8 @@ class MotorQueHablaSinParar(MotorDePrueba):
         super().__init__(**kwargs)
         self.empezo = asyncio.Event()
 
-    async def _hablar(self, texto: str, tiempos: dict[str, float]) -> None:
+    async def _hablar(self, texto: str, tiempos: dict[str, float],
+                      turno: int = 0) -> None:
         self.hablado.append(texto)
         self._cambiar_estado(HABLANDO)
         self.empezo.set()
@@ -122,6 +125,14 @@ def recolectar(motor: MotorNiu) -> list[tuple[str, dict]]:
 
 def estados(eventos: list[tuple[str, dict]]) -> list[str]:
     return [datos["estado"] for tipo, datos in eventos if tipo == "estado"]
+
+
+async def esperar_hasta(condicion, timeout: float = 2.0) -> None:
+    """Espera a que se cumpla una condición sin dormir un tiempo fijo."""
+    limite = time.monotonic() + timeout
+    while not condicion():
+        assert time.monotonic() < limite, "la condición no se cumplió a tiempo"
+        await asyncio.sleep(0.01)
 
 
 # ─── Arranque y parada ────────────────────────────────────────────────
@@ -244,6 +255,126 @@ async def test_detener_voz_sin_voz_en_curso_no_hace_nada():
     await motor.detener_voz()
 
     assert motor.en_marcha
+    await motor.detener()
+
+
+# ─── Entrada de texto (chat del panel) ────────────────────────────────
+
+
+async def test_sin_microfono_el_texto_del_panel_arranca_el_motor():
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+    await motor.iniciar()
+
+    assert motor.en_marcha
+    assert motor.enviar_texto("hola") is True
+
+    await esperar_hasta(lambda: motor.brain.mensajes == ["hola"])
+    assert motor.hablado == ["hola"]
+
+    await motor.detener()
+
+
+async def test_enviar_texto_con_el_motor_apagado_no_hace_nada():
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+
+    assert motor.enviar_texto("hola") is False
+
+
+async def test_el_texto_vacio_no_se_acepta():
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+    await motor.iniciar()
+
+    assert motor.enviar_texto("   ") is False
+    assert motor.enviar_texto("") is False
+
+    await motor.detener()
+
+
+async def test_un_motor_sin_entrada_de_texto_lo_rechaza(monkeypatch):
+    entrada(monkeypatch, ["salir"])
+    motor = MotorDePrueba()      # teclado sí, texto no
+
+    assert motor.enviar_texto("hola") is False
+
+
+async def test_el_texto_del_chat_no_cierra_la_sesion():
+    """«adiós» escrito en el panel es una frase, no la orden de apagar."""
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+    await motor.iniciar()
+
+    assert motor.enviar_texto("adios") is True
+    await esperar_hasta(lambda: motor.hablado == ["adios"])
+
+    assert motor.en_marcha
+    await motor.detener()
+
+
+async def test_los_eventos_del_turno_llevan_numero():
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+    eventos = recolectar(motor)
+    await motor.iniciar()
+
+    motor.enviar_texto("uno")
+    await esperar_hasta(lambda: motor.hablado == ["uno"])
+    motor.enviar_texto("dos")
+    await esperar_hasta(lambda: motor.hablado == ["uno", "dos"])
+    await esperar_hasta(
+        lambda: sum(1 for tipo, _ in eventos if tipo == "respuesta") == 2
+    )
+
+    await motor.detener()
+
+    turnos = {
+        tipo: [datos.get("turno") for t, datos in eventos if t == tipo]
+        for tipo in ("respuesta_inicio", "fragmento", "respuesta", "metricas")
+    }
+    assert turnos["respuesta_inicio"] == [1, 2]
+    assert set(turnos["fragmento"]) == {1, 2}
+    assert turnos["respuesta"] == [1, 2]
+    assert turnos["metricas"] == [1, 2]
+
+
+async def test_un_turno_sin_audio_avisa_en_el_chat(monkeypatch):
+    """Edge-TTS falla a veces (es un servicio en la nube): que no sea en silencio."""
+    async def sin_audio(fragmentos, archivo, medidas=None, al_hablar=None):
+        async for _ in fragmentos:
+            pass
+        return "hola"       # texto sí, pero ninguna parte de audio
+
+    monkeypatch.setattr("core.motor.hablar_por_partes", sin_audio)
+    # El doble de pruebas sustituye `_hablar` entero; aquí hace falta el real,
+    # que es el que decide avisar cuando no sonó nada.
+    monkeypatch.setattr(MotorDePrueba, "_hablar", MotorNiu._hablar)
+
+    motor = MotorDePrueba(permitir_teclado=False, permitir_texto=True)
+    eventos = recolectar(motor)
+    await motor.iniciar()
+
+    motor.enviar_texto("hola")
+    await esperar_hasta(
+        lambda: any(tipo == "respuesta" for tipo, _ in eventos)
+    )
+
+    await motor.detener()
+
+    assert any("no tiene audio" in datos["mensaje"]
+               for tipo, datos in eventos if tipo == "sistema")
+
+
+async def test_cancelar_una_respuesta_avisa_del_turno(monkeypatch):
+    entrada(monkeypatch, ["hola", "salir"])
+    motor = MotorQueHablaSinParar()
+    eventos = recolectar(motor)
+
+    await motor.iniciar()
+    await asyncio.wait_for(motor.empezo.wait(), timeout=2)
+
+    await motor.detener_voz()
+
+    canceladas = [datos for tipo, datos in eventos
+                  if tipo == "respuesta_cancelada"]
+    assert canceladas == [{"turno": 1}]
+
     await motor.detener()
 
 

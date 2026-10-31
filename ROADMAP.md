@@ -240,9 +240,9 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 | Ajustes tipados | `core/config.py`: un solo objeto validado, `config.json` y valores por defecto | ✅ |
 | Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ✅ |
 | Panel mínimo | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar y estado | ✅ |
-| Vista de chat | Transcripción, texto de Niu en streaming y métricas por turno | ⚠️ pendiente |
+| Vista de chat | Chat con streaming en vivo, métricas por turno, entrada de texto y sesión en `sesiones/*.json` | ✅ |
 | Ajustes en la UI | 10 esenciales, avanzados plegados, «restaurar» y «probar voz» | ⚠️ pendiente |
-| Tema espacial | Blanco azulado, azules/violetas, vidrio suave y campo de estrellas | ⚠️ pendiente |
+| Tema espacial | Blanco azulado, azules/violetas, vidrio suave y campo de estrellas | ✅ |
 
 ---
 
@@ -253,7 +253,7 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 | Barge-in | Cancelar TTS si el usuario habla mientras Niu habla |
 | Streaming de audio | Reducir latencia eliminando WAV temporal cuando sea viable |
 | VAD | Detectar automáticamente el fin de frase |
-| Historial persistente | Guardar/cargar sesiones en JSON o SQLite |
+| Historial persistente | Memoria a largo plazo (el chat del panel ya guarda `sesiones/*.json`, pero por arranque) |
 | Múltiples usuarios | Identificar al interlocutor |
 
 ---

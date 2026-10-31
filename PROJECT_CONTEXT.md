@@ -43,15 +43,17 @@ Vtuber IA odyssey/
 │   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
 ├── main.py                # Cliente de consola: suscribe a los eventos del motor y los imprime
 ├── panel/                 # Panel de control local (FastAPI en 127.0.0.1)
-│   ├── app.py             # API: arrancar/parar/detener voz + chips de estado
+│   ├── app.py             # API: motor, chips, chat (`/api/mensaje`) y WebSocket `/ws`
+│   ├── chat.py            # Historial: eventos del motor → mensajes → sesiones/*.json
 │   ├── __main__.py        # `python -m panel` → uvicorn en 127.0.0.1:8000
-│   └── static/            # Interfaz: HTML + CSS del tema espacial + JS de sondeo
+│   └── static/            # Interfaz: HTML + CSS del tema espacial + JS de sondeo y chat
 ├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
 ├── probar_lipsync.py      # Prueba de extremo a extremo de la boca
 ├── tests/                 # pytest: lógica que puede romperse en silencio
 ├── requirements.txt
 ├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
 ├── config.json            # Ajustes editables desde el panel (no versionado)
+├── sesiones/              # Chat guardado por el panel: un JSON por arranque (no versionado)
 ├── vts_token.txt          # Token VTS persistente (no versionado)
 ├── test_audio.py          # Script auxiliar para listar salidas de audio
 └── dia_por_dia/           # Historial de aprendizaje
@@ -60,7 +62,7 @@ Vtuber IA odyssey/
 ### Flujo funcional actual
 
 ```text
-Usuario: voz (micrófono DGM20) o teclado
+Usuario: voz (micrófono DGM20), teclado o chat del panel
         ↓
 core/motor.py  (MotorNiu: estados + eventos; main.py y el panel son clientes)
         ↓
@@ -82,8 +84,10 @@ core/lipsync.py → hablar_por_partes: tres etapas solapadas por colas
 ```
 
 `MotorNiu` no imprime nada: emite eventos (`transcripcion`, `fragmento`,
-`parte`, `metricas`, `estado`, `error`). `main.py` los traduce a texto de
-consola; el panel los usará para pintar el chat y los chips de estado. La
+`parte`, `metricas`, `estado`, `error`...). `main.py` los traduce a texto de
+consola; el panel los convierte en chat (`panel/chat.py`), métricas por turno y
+chips de estado. Los eventos de un turno llevan `turno` (número creciente) para
+que el panel empareje fragmentos, audio y métricas sin adivinar por orden. La
 conversación existe en un solo sitio.
 
 Las tres etapas del final **no van en fila**: mientras una parte suena, la
@@ -106,12 +110,13 @@ respuesta completa.
 - ✅ Cronómetro por turno: `core/motor.py` emite `metricas` y `main.py` imprime el tiempo de cada etapa y el total hasta el primer sonido.
 - ✅ **Motor separado de la consola** (`core/motor.py`): `MotorNiu.iniciar()`, `detener()` y `detener_voz()`, estados (`apagado`, `iniciando`, `escuchando`, `pensando`, `hablando`) y eventos. `detener_voz()` corta el audio (`sd.stop()`) y cancela solo la tarea del turno; el motor sigue escuchando. `main.py` quedó como cliente de consola.
 - ✅ **Panel mínimo** (`panel/`): `python -m panel` levanta FastAPI + uvicorn en `127.0.0.1:8000`. Arranca y para el motor, calla la voz y muestra chips de estado (motor, Ollama, VTube Studio, micrófono, TTS) con la voz activa. La interfaz es HTML/CSS/JS estático: sin build ni `node`. Motor y panel comparten proceso y bucle de `asyncio`; si el arranque falla, el panel sigue vivo y explica el motivo.
+- ✅ **Chat en el panel** (`panel/chat.py` + `/ws`): burbujas de usuario y Niu con streaming en vivo (texto al mismo ritmo que suena), métricas por turno, entrada de texto (`enviar_texto()` en el motor, funciona sin micrófono), avisos del motor como notas, y globos de respuestas cortadas marcadas «interrumpida». El chat se guarda en `sesiones/*.json` (un archivo por arranque), se limpia empezando otra sesión y se exporta a Markdown.
 - ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
 - ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige voz, tono, reglas de estilo y **prompt del STT**. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas, con la voz de Aria en tono normal. La voz y el tono se pueden forzar con `NIU_VOZ` / `NIU_TONO`.
 - ✅ **Oído en el idioma del perfil**: `idioma_stt()` devuelve el código del perfil salvo que `NIU_STT_IDIOMA` diga otra cosa. Antes estaba en automático con un prompt en español, y Whisper transcribía el inglés en español.
 - ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
-- ✅ 129 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, ajustes (`test_config.py`), motor (`test_motor.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
+- ✅ 162 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, cancelación de la grabación (`test_stt_cancelar.py`), ajustes (`test_config.py`), motor (`test_motor.py`, incluida la entrada de texto), historial del chat (`test_chat.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -599,11 +604,12 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Los scripts sueltos de la raíz (`probar_entrada_voz.py`, `prueba_de_voz.py`, `diagnostico_mic.py`, `dia_por_dia/*`) siguen leyendo `os.getenv` directamente: no se migraron porque son herramientas de diagnóstico, no el motor.
 - Varias variables se leen al construir un objeto (modelo de Whisper, `keep_alive`) y no pueden cambiar en caliente: por eso el plan del panel las marca como «se aplica al reiniciar el motor».
 - Logging profesional pendiente.
-- El texto de Niu y los mensajes técnicos del TTS se mezclan en la consola durante el streaming (el panel los separará cuando tenga chat, fase 3).
+- Cuando Edge-TTS (servicio en la nube) falla para todas las frases, el turno acaba sin audio. El motor ya avisa en el chat («⚠️ Esta respuesta no tiene audio...»), pero no reintenta el turno entero.
+- El micrófono oye la sala (y a veces el audio de Niu) y Whisper alucina frases tipo «¡Suscríbete al canal!» con silencio: falta un filtro de transiciones falsas.
 - Tests unitarios pendientes del cerebro y del adaptador LLM (la envolvente del lip sync, el corte de frases y el tope de tiempo del TTS ya los tienen en `tests/`).
 - Interrupción de TTS pendiente (barge-in).
-- El panel aún no tiene chat ni ajustes: son las fases 3 y 4. Hoy solo arranca, para, calla la voz y muestra estado.
-- El chat del panel no puede sobrevivir al cierre mientras no exista la vista (fase 3).
+- El panel aún no tiene editor de ajustes (fase 4): hoy se cambian editando `config.json` o las variables de entorno.
+- El chat del panel guarda la conversación mientras el panel está abierto; abrir el panel empieza una sesión nueva (`sesiones/*.json`). El motor no conserva nada: esa es la memoria del cerebro, no del panel.
 - Las frases se sintetizan y reproducen de una en una: entre una parte y otra puede notarse una pausa si el TTS tarda más que la duración de la anterior (no se precargan varias por adelantado).
 - El idioma es fijo por sesión: en modo `en` Niu no imita el idioma del usuario. El modo espejo necesita que Whisper exponga el idioma detectado y elegir voz por turno.
 - El registro inglés del prompt está sin probar a fondo: es un modelo de 7B y la personalidad puede desdibujarse más en inglés que en español.
