@@ -148,6 +148,7 @@ La beta `v0.1.0-beta` ya conversa de punta a punta. El problema deja de ser «¿
 | No descargar el modelo | `keep_alive` de 30 min en lugar de los 5 min por defecto | ✅ |
 | Comprobar la VRAM | `turbo` (1,6 GB) + Ollama (4,4 GB) = 5797/6141 MiB, sin caídas a CPU | ✅ |
 | Tubería por frases | Cerebro en streaming → `core/frases.py` → sintetizar → encolar reproducción, tres etapas solapadas | ✅ |
+| Sin pausas entre partes | Recorte del silencio de Edge-TTS (~0,85 s por frase) y mínimo de 40 caracteres por trozo | ✅ |
 | Tope de tiempo en el TTS | Edge-TTS se quedó colgado >5 min sin dar error: 15 s y 2 intentos por frase | ✅ |
 | Respuestas más cortas | Duran 15-17 s de audio: ya no bloquean, pero alargan el turno antes de poder hablar otra vez | ⚠️ pendiente |
 | Barge-in | Poder interrumpir a Niu mientras habla | ⚠️ pendiente |
@@ -178,6 +179,38 @@ El primer reparto se hizo a ojo y colocaba el 40 % en la transcripción. Medido,
 El aprendizaje más útil no fue el modelo nuevo, sino **dónde se paga cada coste**. Cargar un modelo cuesta lo mismo siempre; la pregunta es si se paga al arrancar o en mitad de la primera frase.
 
 La tubería por frases añadió la otra lección: el problema no era que una etapa fuera lenta, sino **el orden**. Esperar la respuesta completa para decir la primera palabra era tirar 3,8 s de trabajo ya hecho.
+
+---
+
+# 🎯 FASE 2.9: IDIOMAS
+
+Objetivo: poder crear contenido en inglés sin bifurcar el código, y que Niu suene a persona hablando inglés y no a una traducción.
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Perfiles de idioma | `core/idiomas.py`: tabla con voz, código y reglas de estilo. `NIU_IDIOMA=es|en` | ✅ |
+| Reglas de estilo propias | Muletillas nativas y prohibición de traducir las españolas en literal | ✅ |
+| Voz por idioma | La voz sale del perfil; `NIU_VOZ` la fuerza sin tocar código | ✅ |
+| Muestras de voz | `muestras_voces/`: la misma frase con 4 voces inglesas para elegir de oído | ✅ |
+| Voz elegida | Confirmar con Héctor cuál se queda como `en-US-*` por defecto | ⚠️ pendiente |
+| Personalidad en inglés | Comprobar con conversación real que el personaje no se desdibuja | ⚠️ pendiente |
+| Modo espejo | Responder en el idioma del usuario: requiere el idioma detectado por Whisper y voz por turno | ⚠️ pendiente |
+| Más idiomas | Añadir una entrada a la tabla (francés, japonés) | ⚠️ pendiente |
+
+### Pregunta guía del hito
+
+> "Ya hay un `Protocol` para el proveedor de LLM. ¿El idioma también debería serlo?"
+
+```text
+No. Una interfaz sirve cuando el comportamiento cambia (Ollama y Gemini hablan
+protocolos distintos). Un idioma es el mismo código con otros datos: eso es una
+tabla de configuración. La pregunta que decide: ¿cambia lo que hace, o solo los
+valores con los que lo hace?
+```
+
+### Lo que costó entenderlo
+
+El primer impulso fue «responde en inglés» y ya está. Pero el prompt está escrito en español y con muletillas españolas: el modelo las traducía y Niu decía *«well... I mean... this...»*. El idioma no es solo la voz ni la instrucción; es también el registro.
 
 ---
 

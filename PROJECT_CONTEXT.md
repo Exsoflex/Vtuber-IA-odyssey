@@ -33,7 +33,9 @@ Vtuber IA odyssey/
 │   ├── stt_provider.py    # Interfaz común (Protocol) + utilidades de audio
 │   ├── stt_whisper.py      # Adaptador local: faster-whisper (GPU/CPU)
 │   ├── stt_gemini.py       # Adaptador nube: Gemini (audio → texto)
-│   ├── tts.py             # Voz: Edge-TTS → MP3 → dispositivo virtual
+│   ├── tts.py             # Voz: Edge-TTS → MP3 → dispositivo de salida (y recorte de silencio)
+│   ├── frases.py          # Corta el texto en frases mientras llega (streaming)
+│   ├── idiomas.py         # Perfiles de idioma: voz, código y reglas de estilo
 │   ├── lipsync.py         # Boca: audio → envolvente → parámetro de VTS
 │   ├── audio_devices.py   # Búsqueda de dispositivos por nombre y host API
 │   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
@@ -65,7 +67,8 @@ core/frases.py  (corta el texto en frases según llega)
         ↓
 core/lipsync.py → hablar_por_partes: tres etapas solapadas por colas
         texto → síntesis → reproducción + boca
-        ├── core/tts.py → MP3 → endpoint de salida de Windows (auriculares DGM20)
+        ├── core/tts.py → MP3 → recorte de silencio → salida de Windows
+        ├── core/idiomas.py decide voz y reglas de estilo (NIU_IDIOMA)
         └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
 
@@ -88,8 +91,10 @@ respuesta completa.
 - ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
 - ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
 - ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
+- ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige la voz y las reglas de estilo. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas. La voz se puede forzar con `NIU_VOZ`.
+- ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
-- ✅ 44 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, envolvente del lip sync y el tope de tiempo del TTS.
+- ✅ 70 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync y el tope de tiempo del TTS.
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -180,16 +185,16 @@ GOOGLE_API_KEY=tu_api_key
 
 ## 🧪 Problema actual
 
-El backend local ya está integrado y responde, el oído funciona de extremo a extremo, la boca se mueve con la voz mientras suena (parte a parte), el audio sale por los auriculares y la conversación ya se siente fluida: **1,95 s hasta la primera palabra**. Los puntos débiles conocidos ahora son:
+El backend local ya está integrado y responde, el oído funciona de extremo a extremo, la boca se mueve con la voz mientras suena (parte a parte), el audio sale por los auriculares, la conversación se siente fluida (**0,95-1,65 s hasta la primera palabra**) y funciona en español y en inglés (`NIU_IDIOMA`). Los puntos débiles conocidos ahora son:
 
 - Las expresiones emocionales usan hotkeys (`MouthSmile`, `MouthFrown`...) que no existen en el modelo cargado.
 - El TTS bloquea el bucle mientras habla (no hay barge-in): no se puede interrumpir a Niu.
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
-- Las respuestas duran 15-17 s de audio; con streaming ya no bloquean, pero alargan el turno antes de poder volver a hablar.
+- Las respuestas duran 14-17 s de audio; con streaming ya no bloquean, pero alargan el turno antes de poder volver a hablar.
 - Los mensajes técnicos del TTS se mezclan con el texto de Niu en la consola, porque ahora ocurren a la vez.
-- Hay tests de la envolvente, del corte de frases y del tope de tiempo del TTS, pero no del cerebro ni del adaptador LLM.
+- Hay tests de la envolvente, del corte de frases, del recorte de silencio y de los idiomas, pero no del cerebro ni del adaptador LLM.
 
-**Objetivo inmediato:** probar la tubería con la voz real de Héctor y afinar lo que se note (pausas entre partes, respuestas más cortas). Después, barge-in y logging.
+**Objetivo inmediato:** crear contenido en inglés con la voz elegida por Héctor (`NIU_IDIOMA=en`) y observar si la personalidad se sostiene en inglés. Después: respuestas más cortas, modo espejo de idioma y barge-in.
 
 ### Caso resuelto: «Niu responde pero no se la oye»
 
@@ -351,6 +356,50 @@ Efecto secundario del corte: aparecen trozos que solo contenían emojis (`"🚀�
 
 Coste de esta arquitectura: ya no se tiene la frase entera antes de hablar, así que **no se puede saber la duración total ni elegir la expresión del avatar al principio** — hay que decidir parte a parte o al final (lo que devuelve `hablar_por_partes`). Y los mensajes técnicos del TTS se mezclan con el texto de Niu en la consola, porque ahora ocurren a la vez.
 
+### Caso resuelto: «le hablo en inglés y me contesta en español»
+
+Síntoma: la transcripción del inglés era correcta, pero Niu respondía en español. Y no siempre: en un turno contestaba «Bueno... yo creo que estoy bastante bien» y en otro «Sure thing! Here's a silly phrase». Sin patrón fijo.
+
+Causa: **nadie le había dicho en qué idioma hablar**. El idioma vive en tres sitios y ninguno lo fijaba:
+
+| dónde | estado anterior |
+|---|---|
+| STT (`language=`) | detección automática: el inglés se transcribía bien |
+| prompt de personalidad | escrito en español, sin ninguna regla de idioma |
+| voz de Edge-TTS | `es-MX-DaliaNeural`, fija |
+
+Decisión de diseño: **tabla de perfiles, no `Protocol`**. `LLMProvider` es una interfaz porque Ollama y Gemini hacen cosas distintas (HTTP con JSON, SDK con auth, streams con otra forma). Un idioma es el mismo código con otros datos. Dos clases `EspanolProvider`/`InglesProvider` serían dos clases que solo devuelven strings distintos.
+
+El detalle que casi se escapa: el prompt está escrito en español **con muletillas españolas** («bueno...», «o sea...», «este...»). Pidiendo solo «responde en inglés», el modelo las **traduce** y Niu suena a española hablando inglés: *«well... I mean... this...»*. Por eso el perfil inglés trae sus propias muletillas («like...», «you know...», «honestly...») y una regla explícita de no traducir literalmente.
+
+La personalidad se escribe una vez. El perfil no la reescribe: le añade un bloque. Dos prompts paralelos se desincronizan al primer cambio.
+
+Resultado medido: respuesta en inglés con contracciones («I'm», «gonna», «kinda»), muletillas nativas y voz inglesa. Y un efecto secundario bueno: al estar el idioma fijado, las respuestas dejan de mezclar idiomas.
+
+Límite de esta decisión: en modo fijo Niu **no imita** el idioma del usuario. Ese modo (espejo) requiere que Whisper exponga el idioma detectado y elegir voz por turno; queda pendiente a propósito.
+
+### Caso resuelto: «las pausas entre partes se notaban»
+
+Síntoma: con el streaming funcionando, entre una parte y otra había pausas de «segundos o menos». La tubería no tenía la culpa: el audio siguiente solía estar listo antes de que terminara el anterior.
+
+Medido antes de tocar nada: Edge-TTS rellena **cada frase** con ~0,18 s al principio y **~0,85 s al final**. En una respuesta entera no se nota, porque el relleno solo está en los bordes. Al hablar por partes, cada trozo arrastra el suyo y las fronteras suman ~1 s.
+
+El dato que lo dejó claro: «¡Hola!» duraba 1,87 s con **0,40 s de voz**. El 78 % era silencio.
+
+Dos arreglos, en este orden:
+
+1. **Recortar** ese relleno dejando 0,05 s al principio y 0,15 s al final. No a cero: un poco de aire es lo que evita que el habla suene atropellada.
+2. **No decir frases de menos de 40 caracteres por separado**: se acumulan con la siguiente. Un «¡Bueno!» de 0,6 s no compensa los ~0,3 s de pausa que abre y cierra el dispositivo.
+
+El segundo arreglo tiene una excepción que salió de medir: aplicado también a la primera frase, el primer sonido subía de **0,95 s a 2,40 s**. Al arrancar manda la velocidad; a partir de la segunda frase manda el ritmo.
+
+| | antes | después |
+|---|---|---|
+| partes (español) | 8 | 5 |
+| audio dicho | 26 s | 17 s |
+| partes (inglés) | 9 | 4 |
+| primer sonido | 1,09 s | **0,95 s** |
+
 ### Caso resuelto: «el micrófono no entendía»
 
 Síntoma: el micrófono capturaba, el nivel era correcto (−30 dBFS), pero todos los motores fallaban (Google devolvía vacío, Whisper alucinaba «¡Suscríbete!», Gemini inventaba otros idiomas).
@@ -437,6 +486,11 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **La puntuación es una decisión sobre el personaje, no sobre el código**: que los «...» no cierren frase no es un detalle técnico; es lo que evita que cada duda de Niu suene como una frase nueva.
 - **Todo servicio externo necesita un tope de tiempo**: Edge-TTS dejó de contestar sin cerrar la conexión y el sistema esperó más de 5 minutos. Sin `timeout` no hay error que capturar, solo un cuelgue silencioso. Y tras un fallo hay que crear un objeto nuevo si el anterior se consumió.
 - **Un test puede simular lo que no se puede provocar**: esperar a que un servicio se caiga justo ahora es imposible, pero sustituir su clase por un doble que se cuelga prueba el comportamiento igual, en milisegundos.
+- **Configuración o abstracción: no todo lo que varía necesita una interfaz**: los proveedores LLM necesitan un `Protocol` porque su *comportamiento* difiere; los idiomas son el mismo código con otros datos y se resuelven con una tabla de perfiles. La pregunta que decide es «¿cambia lo que hace, o solo los valores con los que lo hace?».
+- **El idioma no es solo traducir**: el registro vive en el prompt. Pedir «responde en inglés» a un prompt lleno de muletillas españolas produce inglés traducido, no inglés natural. La solución es darle al perfil sus propias muletillas, no traducir las existentes.
+- **Los servicios externos rellenan el audio**: Edge-TTS añade ~0,85 s de silencio al final de cada frase. En un audio entero es invisible; al trocearlo, cada trozo arrastra su relleno y el silencio se convierte en pausa. Hay que medir los bordes, no solo la duración.
+- **Política y mecanismo separados**: `extraer_frases` corta (mecanismo); cuándo *conviene* cortar (mínimo de caracteres, primera frase exenta) es política y la aplican los generadores. Así el mecanismo se puede probar con y sin política.
+- **Los tests de propiedad encuentran bugs tontos y reales**: comprobar que el texto reconstruido es igual al original descubrió que al acumular frases cortas se comía un espacio y las palabras se pegaban («¡Hola!Sí»). Ningún test de «contiene esta frase» lo habría visto.
 
 ### Aún no asumir dominio completo de
 
@@ -458,6 +512,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Interrupción de TTS pendiente (barge-in).
 - El texto de Niu y los mensajes técnicos del TTS se mezclan en la consola durante el streaming.
 - Las frases se sintetizan y reproducen de una en una: entre una parte y otra puede notarse una pausa si el TTS tarda más que la duración de la anterior (no se precargan varias por adelantado).
+- El idioma es fijo por sesión: en modo `en` Niu no imita el idioma del usuario. El modo espejo necesita que Whisper exponga el idioma detectado y elegir voz por turno.
+- El registro inglés del prompt está sin probar a fondo: es un modelo de 7B y la personalidad puede desdibujarse más en inglés que en español.
 - Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
