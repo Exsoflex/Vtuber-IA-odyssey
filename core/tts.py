@@ -72,6 +72,18 @@ TARGET_SAMPLE_RATE = 48000  # Hz; se remuestrea aquí para no depender del endpo
 # latencia y una pieza menos que puede romperse.
 DISPOSITIVO_SALIDA = os.getenv("NIU_SALIDA") or None
 
+# Tope de tiempo por síntesis, y cuántas veces se reintenta.
+#
+# Edge-TTS es un servicio externo, no una función local: a veces tarda, y a
+# veces deja de contestar sin cerrar la conexión. Sin tope, eso cuelga la
+# conversación entera para siempre; medido en este equipo, un turno se quedó
+# esperando más de 5 minutos dentro de `comunicador.save()`.
+#
+# Perder una frase es molesto; quedarse mudo del todo es peor. Con un tope, el
+# turno sigue: la parte que falló se salta y el resto se dice igual.
+TIMEOUT_TTS = float(os.getenv("NIU_TTS_TIMEOUT", "15"))
+INTENTOS_TTS = int(os.getenv("NIU_TTS_INTENTOS", "2"))
+
 
 @dataclass
 class AudioPreparado:
@@ -148,7 +160,9 @@ async def sintetizar_voz_async(
         # Limpiar emojis para la síntesis vocal (se conservan para subtítulos)
         texto_para_tts = _limpiar_texto_para_tts(texto)
         if not texto_para_tts.strip():
-            print("[WARN] [TTS] Texto vacío después de filtrar emojis")
+            # Normal en streaming: el corte por frases deja trozos que solo
+            # tenían emojis. No es un fallo, no hay nada que decir.
+            print("[TTS] Trozo sin texto (solo emojis): se salta")
             return False
 
         comunicador = edge_tts.Communicate(
@@ -159,7 +173,24 @@ async def sintetizar_voz_async(
         )
 
         os.makedirs(os.path.dirname(archivo_salida), exist_ok=True)
-        await comunicador.save(archivo_salida)
+
+        # Se crea un comunicador nuevo en cada intento: `save()` consume el
+        # comunicador, así que reutilizarlo tras un fallo no funcionaría.
+        for intento in range(1, INTENTOS_TTS + 1):
+            if intento > 1:
+                comunicador = edge_tts.Communicate(
+                    text=texto_para_tts, voice=voz, rate=VELOCIDAD, pitch=TONO
+                )
+            try:
+                await asyncio.wait_for(comunicador.save(archivo_salida),
+                                       timeout=TIMEOUT_TTS)
+                break
+            except asyncio.TimeoutError:
+                print(f"[WARN] [TTS Edge] Sin respuesta en {TIMEOUT_TTS:.1f} s "
+                      f"(intento {intento}/{INTENTOS_TTS})")
+                if intento == INTENTOS_TTS:
+                    print("[WARN] [TTS Edge] Se salta esta frase")
+                    return False
 
         print(f"[TTS Edge]: Audio generado y guardado "
               f"({os.path.getsize(archivo_salida)} bytes)")

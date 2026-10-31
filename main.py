@@ -22,7 +22,7 @@ from core.stt import (
     crear_proveedor_stt,
     grabar_hasta_silencio,
 )
-from core.lipsync import hablar_con_lipsync
+from core.lipsync import hablar_por_partes
 from core.vts_client import vts_client
 
 # ─── UTF-8 y salida sin buffering en consola Windows ───────────────────────
@@ -38,27 +38,39 @@ DISPOSITIVO_ENTRADA = os.getenv("NIU_MIC", "DGM20 USB Microphone")
 IDIOMA_STT = os.getenv("NIU_STT_IDIOMA", "").strip().lower() or None
 
 
+async def _mostrando_el_texto(fragmentos):
+    """Muestra cada fragmento según llega y lo deja pasar tal cual.
+
+    Sirve para que el texto aparezca en pantalla al mismo ritmo que el cerebro
+    escribe, sin que la voz tenga que esperar a tenerlo todo.
+    """
+    async for fragmento in fragmentos:
+        print(fragmento, end="", flush=True)
+        yield fragmento
+
+
 async def hablar_con_niu(texto_usuario: str, brain: NiuBrain,
                          tiempos: dict[str, float] | None = None):
-    """Flujo completo: Cerebro -> texto -> TTS con lip sync -> audio."""
+    """Flujo completo: cerebro en streaming -> frases -> TTS con lip sync."""
     tiempos = tiempos if tiempos is not None else {}
-
-    inicio = time.perf_counter()
-    respuesta_niu = await brain.procesar_mensaje("Rotceh", texto_usuario)
-    tiempos["cerebro"] = time.perf_counter() - inicio
-    print(f"\nNiu: {respuesta_niu}")
 
     archivo_audio = os.path.abspath("dia_por_dia/voz_temp.mp3")
     os.makedirs(os.path.dirname(archivo_audio), exist_ok=True)
 
-    # Sintetiza, reproduce y mueve la boca. La boca la calcula Niu a partir de
-    # su propio audio: no depende del micrófono de VTube Studio.
-    # `tiempos` se rellena con lo que tardó cada etapa: sin números, optimizar
-    # la latencia es adivinar.
-    exito_tts = await hablar_con_lipsync(respuesta_niu, archivo_audio,
-                                         medidas=tiempos)
-    if not exito_tts:
-        print("❌ [Error] No se pudo generar el audio de Niu")
+    # El cerebro va escribiendo y cada frase se dice en cuanto está completa:
+    # la primera suele estar lista en menos de un segundo, así que Niu empieza
+    # a hablar sin esperar al final de la respuesta.
+    # La boca la calcula Niu a partir de su propio audio, parte por parte.
+    print("\nNiu: ", end="", flush=True)
+    respuesta_niu = await hablar_por_partes(
+        _mostrando_el_texto(brain.procesar_mensaje_streaming("Rotceh", texto_usuario)),
+        archivo_audio,
+        medidas=tiempos,
+    )
+    print()
+
+    if not respuesta_niu.strip():
+        print("❌ [Error] Niu no llegó a decir nada")
         return
 
     mostrar_tiempos(tiempos)
@@ -77,14 +89,22 @@ async def hablar_con_niu(texto_usuario: str, brain: NiuBrain,
 def mostrar_tiempos(t: dict[str, float]) -> None:
     """Resume la latencia del turno: de tu silencio al primer sonido.
 
-    La columna que importa es la última. Las demás dicen *dónde* se fue el
-    tiempo, que es lo que permite decidir qué optimizar después.
+    En la primera línea está lo que decide si la conversación se siente fluida;
+    la cifra que manda es la última. Con streaming, `texto` ya no es lo que
+    tarda el cerebro en total, sino lo que tarda en tener lista la **primera
+    frase**: es cuando se puede empezar a hablar.
     """
-    hasta_sonido = sum(t.get(k, 0.0) for k in ("stt", "cerebro", "sintesis", "preparacion"))
+    hasta_sonido = sum(
+        t.get(clave, 0.0) for clave in ("stt", "texto", "sintesis", "preparacion")
+    )
     print(
-        f"⏱️  STT {t.get('stt', 0.0):.2f} | cerebro {t.get('cerebro', 0.0):.2f} | "
+        f"⏱️  STT {t.get('stt', 0.0):.2f} | 1ª frase {t.get('texto', 0.0):.2f} | "
         f"TTS {t.get('sintesis', 0.0):.2f} | preparar {t.get('preparacion', 0.0):.2f} | "
-        f"hablando {t.get('voz', 0.0):.2f} | ➜ primer sonido {hasta_sonido:.2f} s"
+        f"➜ primer sonido {hasta_sonido:.2f} s"
+    )
+    print(
+        f"    partes {int(t.get('partes', 0))} | hablando {t.get('voz', 0.0):.2f} s | "
+        f"cerebro completo {t.get('generando', 0.0):.2f} s"
     )
 
 

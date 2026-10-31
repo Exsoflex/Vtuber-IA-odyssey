@@ -23,4 +23,9 @@ nvidia-cudnn-cu12;  sys_platform == "win32" or sys_platform == "linux"
 # pytest: tests de la lógica que puede romperse sin dar error (la envolvente
 # del lip sync, por ejemplo). Ejecutar con: python -m pytest tests -q
 pytest
+# pytest-asyncio: la tubería de voz es asíncrona (colas, streaming, TTS), así
+# que sus tests son `async def`. Sin este plugin, pytest los marca como
+# "async def functions are not natively supported" y los da por fallidos sin
+# ejecutarlos. Con asyncio_mode=auto (ver pytest.ini) se ejecutan solos.
+pytest-asyncio
 

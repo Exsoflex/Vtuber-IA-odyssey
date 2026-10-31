@@ -45,10 +45,12 @@ import asyncio
 import ctypes
 import sys
 import time
+from typing import AsyncIterator
 
 import numpy as np
 
 from core import tts
+from core.frases import frases_de_async
 from core.vts_client import vts_client
 
 # Nombre del parámetro de tracking. VTS exige alfanumérico y 4-32 caracteres.
@@ -357,71 +359,202 @@ async def animar_boca(boca: list[float], parametro: str | None = None,
     return enviados
 
 
+async def sintetizar_y_preparar(
+    texto: str,
+    archivo_audio: str = "core/voz_temp.mp3",
+    voz: str = tts.VOZ_NIU,
+    medidas: dict[str, float] | None = None,
+) -> tts.AudioPreparado | None:
+    """Convierte texto en audio listo para sonar (y ya medido, para la boca).
+
+    Son los dos primeros pasos de siempre, separados para poder encadenarlos:
+    el streaming sintetiza una parte mientras otra está sonando.
+
+    El audio se deja cargado en memoria, así que el archivo temporal puede
+    reutilizarse sin peligro: para cuando se vuelve a escribir en él, su
+    contenido ya está copiado en el array.
+
+    Args:
+        texto: lo que Niu va a decir.
+        archivo_audio: archivo temporal donde guardar el audio.
+        voz: voz de Edge-TTS.
+        medidas: si se pasa, se anotan `sintesis` y `preparacion`.
+
+    Returns:
+        El audio preparado, o None si el texto no tenía nada que decir (por
+        ejemplo, un trozo que solo contenía emojis).
+    """
+    inicio = time.perf_counter()
+    if not await tts.sintetizar_voz_async(texto, archivo_audio, voz):
+        return None
+    if medidas is not None:
+        medidas["sintesis"] = time.perf_counter() - inicio
+
+    inicio = time.perf_counter()
+    audio = tts.preparar_audio(archivo_audio)
+    if medidas is not None and audio is not None:
+        medidas["preparacion"] = time.perf_counter() - inicio
+    return audio
+
+
+async def decir(audio: tts.AudioPreparado, etiqueta: str = "") -> int:
+    """Reproduce un audio preparado y mueve la boca a la vez.
+
+    Orden de las operaciones, que importa:
+
+    1. Calcular la envolvente **antes** de reproducir: durante la reproducción
+       el bucle solo envía números ya calculados, sin gastar CPU en DSP.
+    2. Lanzar la reproducción en un hilo aparte.
+    3. Inyectar la envolvente en VTS mientras suena.
+
+    Si VTS no está disponible, reproduce igual: el audio nunca depende del
+    avatar.
+
+    Args:
+        audio: audio ya preparado (ver `sintetizar_y_preparar`).
+        etiqueta: texto para distinguir esta parte en los mensajes.
+
+    Returns:
+        Número de valores de boca enviados (0 si no había a quién enviarlos).
+    """
+    boca = envolvente(audio.mono, audio.fs)
+    parametro = await resolver_parametro()
+
+    reproduccion = asyncio.create_task(asyncio.to_thread(tts.reproducir_audio, audio))
+    enviados = 0
+
+    try:
+        if parametro is None:
+            print("[LIPSYNC] Sin control de boca: solo audio")
+        else:
+            inicio_envio = time.perf_counter()
+            enviados = await animar_boca(boca, parametro)
+            duracion_envio = time.perf_counter() - inicio_envio
+            print(f"[LIPSYNC]{etiqueta} Boca animada {enviados}/{len(boca)} frames "
+                  f"en {duracion_envio:.2f} s (audio {audio.duracion:.2f} s)")
+    except Exception as e:
+        print(f"[WARN] [LIPSYNC] {type(e).__name__}: {e}")
+    finally:
+        # Siempre hay que esperar a que termine el audio. Si la boca se rompió
+        # a media frase, o terminó antes, dejar la reproducción en marcha haría
+        # que dos partes sonaran encima de la otra.
+        await asyncio.gather(reproduccion, return_exceptions=True)
+
+    return enviados
+
+
 async def hablar_con_lipsync(
     texto: str,
     archivo_audio: str = "core/voz_temp.mp3",
     voz: str = tts.VOZ_NIU,
     medidas: dict[str, float] | None = None,
 ) -> bool:
-    """Dice una frase con voz y mueve la boca a la vez.
+    """Dice una frase entera de una vez, sin streaming.
 
-    Orden de las operaciones, que importa:
-
-    1. Sintetizar (aquí se va la mayor parte del tiempo).
-    2. Preparar el audio y calcular la envolvente. Se hace **antes** de
-       reproducir: durante la reproducción el bucle solo tiene que enviar
-       números ya calculados, sin gastar CPU en DSP.
-    3. Lanzar la reproducción en un hilo aparte.
-    4. Inyectar la envolvente en VTS mientras suena.
-
-    Si VTS no está disponible, reproduce igual: el audio nunca depende del
-    avatar.
-
-    Args:
-        texto: lo que Niu va a decir.
-        archivo_audio: archivo temporal donde guardar el audio.
-        voz: voz de Edge-TTS.
-        medidas: diccionario opcional donde anotar los tiempos de cada etapa
-            (`sintesis`, `preparacion`, `voz`). Sirve para diagnosticar la
-            latencia sin ensuciar la salida normal.
+    Es el camino simple: esperar el texto completo, sintetizarlo y hablar. Se
+    conserva porque aísla problemas (si con esto se oye y con el streaming no,
+    el fallo está en la tubería por partes) y porque es lo que usan las pruebas
+    de audio sin avatar.
 
     Returns:
         True si se generó y reprodujo el audio.
     """
-    inicio = time.perf_counter()
-    if not await tts.sintetizar_voz_async(texto, archivo_audio, voz):
-        return False
-    if medidas is not None:
-        medidas["sintesis"] = time.perf_counter() - inicio
-
-    inicio = time.perf_counter()
-    audio = tts.preparar_audio(archivo_audio)
+    audio = await sintetizar_y_preparar(texto, archivo_audio, voz, medidas)
     if audio is None:
         return False
     if medidas is not None:
-        medidas["preparacion"] = time.perf_counter() - inicio
         medidas["voz"] = audio.duracion
 
-    boca = envolvente(audio.mono, audio.fs)
-    parametro = await resolver_parametro()
+    await decir(audio)
+    return True
 
-    # Se lanza la reproducción primero y se cuenta el tiempo desde ese instante:
-    # la boca tiene que ir con el audio, no con la red.
-    reproduccion = asyncio.create_task(asyncio.to_thread(tts.reproducir_audio, audio))
+
+async def hablar_por_partes(
+    fragmentos: AsyncIterator[str],
+    archivo_audio: str = "core/voz_temp.mp3",
+    voz: str = tts.VOZ_NIU,
+    medidas: dict[str, float] | None = None,
+) -> str:
+    """Habla mientras el texto todavía se está escribiendo.
+
+    Antes esto era una fila de tres pasos: esperar el texto completo
+    (3,8 s), sintetizarlo entero (0,6 s) y hablar. Ahora son tres etapas que se
+    solapan:
+
+        cerebro (streaming) → síntesis → reproducción + boca
+
+    Mientras una parte suena, la siguiente ya se está sintetizando. El tiempo
+    hasta la primera palabra deja de depender de la respuesta completa y pasa a
+    depender de la primera frase: medido en este equipo, la primera frase está
+    lista a los 0,6 s y su audio cuesta otros 0,6 s.
+
+    Las tres etapas corren como tareas separadas y se comunican por colas, así
+    que ninguna espera a otra para avanzar:
+
+    - `generar_texto` consume el stream del cerebro y va sacando frases enteras
+      (ver `core/frases.py`).
+    - `sintetizar` coge frases y las convierte en audio.
+    - `reproducir` coge audios y los dice, en orden, moviendo la boca.
+
+    Args:
+        fragmentos: lo que produce el cerebro, trozo a trozo.
+        archivo_audio: archivo temporal donde guardar cada parte.
+        voz: voz de Edge-TTS.
+        medidas: si se pasa, se anotan `texto` (espera hasta la primera frase),
+            `sintesis` y `preparacion` (de esa primera parte), `voz` (duración
+            total de lo dicho), `partes` y `generando` (lo que tardó el cerebro).
+
+    Returns:
+        El texto completo que se dijo, para poder revisarlo después (por
+        ejemplo, para decidir la expresión del avatar).
+    """
+    if medidas is None:
+        medidas = {}
+
+    inicio = time.perf_counter()
+    cola_texto: asyncio.Queue[str | None] = asyncio.Queue()
+    cola_audio: asyncio.Queue[tts.AudioPreparado | None] = asyncio.Queue()
+    dicho: list[str] = []
+
+    async def generar_texto() -> None:
+        try:
+            async for frase in frases_de_async(fragmentos):
+                dicho.append(frase)
+                medidas.setdefault("texto", time.perf_counter() - inicio)
+                await cola_texto.put(frase)
+        finally:
+            medidas["generando"] = time.perf_counter() - inicio
+            await cola_texto.put(None)      # fin del texto: cerrar la tubería
+
+    async def sintetizar() -> None:
+        primera = True
+        try:
+            while (frase := await cola_texto.get()) is not None:
+                # Solo se mide la primera parte: es la que decide cuánto tarda
+                # Niu en decir la primera palabra.
+                audio = await sintetizar_y_preparar(
+                    frase, archivo_audio, voz, medidas if primera else None
+                )
+                primera = False
+                if audio is None:
+                    continue        # trozo sin nada que decir (solo emojis)
+                await cola_audio.put(audio)
+        finally:
+            await cola_audio.put(None)
+
+    async def reproducir() -> None:
+        partes = 0
+        duracion = 0.0
+        while (audio := await cola_audio.get()) is not None:
+            partes += 1
+            duracion += audio.duracion
+            await decir(audio, etiqueta=f" parte {partes}:")
+        medidas["partes"] = partes
+        medidas["voz"] = duracion
 
     try:
-        if parametro is not None:
-            inicio_envio = time.perf_counter()
-            enviados = await animar_boca(boca, parametro)
-            duracion_envio = time.perf_counter() - inicio_envio
-            print(f"[LIPSYNC] Boca animada {enviados}/{len(boca)} frames "
-                  f"en {duracion_envio:.2f} s (audio {audio.duracion:.2f} s)")
-        else:
-            print("[LIPSYNC] Sin control de boca: solo audio")
-        await reproduccion
+        await asyncio.gather(generar_texto(), sintetizar(), reproducir())
     except Exception as e:
-        print(f"[WARN] [LIPSYNC] {type(e).__name__}: {e}")
-        await reproduccion
-        return False
+        print(f"[WARN] [LIPSYNC] Tubería interrumpida: {type(e).__name__}: {e}")
 
-    return True
+    return " ".join(dicho)
