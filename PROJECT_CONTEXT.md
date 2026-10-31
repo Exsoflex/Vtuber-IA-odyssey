@@ -27,6 +27,7 @@ Vtuber IA odyssey/
 ├── core/
 │   ├── __init__.py
 │   ├── config.py          # Ajustes tipados: validación, config.json y valores por defecto
+│   ├── motor.py           # Bucle de conversación: estados, eventos, iniciar/detener/detener_voz
 │   ├── brain.py           # Memoria + personalidad + llamada a LLMProvider
 │   ├── llm_provider.py    # Interfaz común (Protocol) + LLMConfig/LLMResponse
 │   ├── ollama_adapter.py  # Implementación local vía /api/chat
@@ -40,7 +41,7 @@ Vtuber IA odyssey/
 │   ├── lipsync.py         # Boca: audio → envolvente → parámetro de VTS
 │   ├── audio_devices.py   # Búsqueda de dispositivos por nombre y host API
 │   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
-├── main.py                # Orquestador: entrada + LLM + TTS + VTS + CLI
+├── main.py                # Cliente de consola: suscribe a los eventos del motor y los imprime
 ├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
 ├── probar_lipsync.py      # Prueba de extremo a extremo de la boca
 ├── tests/                 # pytest: lógica que puede romperse en silencio
@@ -56,6 +57,8 @@ Vtuber IA odyssey/
 
 ```text
 Usuario: voz (micrófono DGM20) o teclado
+        ↓
+core/motor.py  (MotorNiu: estados + eventos; main.py y el panel son clientes)
         ↓
 core/stt.py → PCM 16 kHz (2 canales nativos → mono) → VAD por RMS
         ↓
@@ -74,6 +77,11 @@ core/lipsync.py → hablar_por_partes: tres etapas solapadas por colas
         └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
 
+`MotorNiu` no imprime nada: emite eventos (`transcripcion`, `fragmento`,
+`parte`, `metricas`, `estado`, `error`). `main.py` los traduce a texto de
+consola; el panel los usará para pintar el chat y los chips de estado. La
+conversación existe en un solo sitio.
+
 Las tres etapas del final **no van en fila**: mientras una parte suena, la
 siguiente se está sintetizando y el cerebro sigue escribiendo la tercera. Por
 eso el primer sonido depende de la primera frase (1,95 s medidos) y no de la
@@ -91,13 +99,14 @@ respuesta completa.
 - ✅ Entrada de voz con `sounddevice` (sin PyAudio) y detección de silencio por RMS.
 - ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
 - ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
-- ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
+- ✅ Cronómetro por turno: `core/motor.py` emite `metricas` y `main.py` imprime el tiempo de cada etapa y el total hasta el primer sonido.
+- ✅ **Motor separado de la consola** (`core/motor.py`): `MotorNiu.iniciar()`, `detener()` y `detener_voz()`, estados (`apagado`, `iniciando`, `escuchando`, `pensando`, `hablando`) y eventos. `detener_voz()` corta el audio (`sd.stop()`) y cancela solo la tarea del turno; el motor sigue escuchando. `main.py` quedó como cliente de consola.
 - ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
 - ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige voz, tono, reglas de estilo y **prompt del STT**. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas, con la voz de Aria en tono normal. La voz y el tono se pueden forzar con `NIU_VOZ` / `NIU_TONO`.
 - ✅ **Oído en el idioma del perfil**: `idioma_stt()` devuelve el código del perfil salvo que `NIU_STT_IDIOMA` diga otra cosa. Antes estaba en automático con un prompt en español, y Whisper transcribía el inglés en español.
 - ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
-- ✅ 70 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync y el tope de tiempo del TTS.
+- ✅ 121 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, ajustes (`test_config.py`) y motor (`test_motor.py`: estados, eventos, parada y «detener solo la voz»).
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -543,6 +552,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Medir en vez de suponer**: para saber si un mapeo existe, se inyecta 0 y 1 y se mira si la boca se mueve. Leer el archivo de configuración habría dado falsos negativos.
 - **Un servicio puede contestar solo una vez por frame**: VTS responde en su siguiente frame de render, así que cada petición cuesta 16,7 ms aunque sea local. Eso fija el techo de peticiones por segundo.
 - **`asyncio.sleep` no tiene precisión de milisegundos en Windows**: se despierta en múltiplos de 15,6 ms. Un bucle que dependa de dormir "16 ms" se retrasa el doble. Se arregla con `timeBeginPeriod(1)` de WinMM, o midiendo y compensando.
+- **Separar el motor de la interfaz con eventos**: si el panel copiara el bucle de `main.py`, habría dos conversaciones que se separan con cada cambio. El motor emite hechos (`transcripcion`, `fragmento`, `metricas`) y cada cliente decide cómo mostrarlos. Un oyente roto se aísla: la interfaz es un consumidor, no un requisito para que Niu hable.
+- **Parar de verdad no es cancelar la tarea**: el audio suena en un hilo bloqueado en `sd.wait()`. Cancelar la corrutina lo deja sonando igual; hace falta `sd.stop()` además de la cancelación, y por eso «detener voz» son dos acciones, no una.
 - **Configuración como dato, no como constante de importación**: leer `os.getenv` al importar hace que un cambio en caliente no tenga efecto. Un objeto `Ajustes` congelado, leído en el momento de usarlo y validado al entrar, permite que la interfaz cambie valores sin reiniciar Python y sin dejar el estado a medio cambiar.
 - **Un valor inválido se avisa, no se ignora**: corregir en silencio un tono mal escrito o un silencio de 99 s es peor que rechazarlo, porque el usuario cree que aplicó lo que pidió.
 - **Reloj absoluto en vez de esperas relativas**: si cada frame se programa como `inicio + i/fps` en lugar de "dormir 25 ms", un retraso puntual no se convierte en desfase acumulado.

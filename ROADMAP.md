@@ -238,7 +238,7 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 | Tarea | Descripción | Estado |
 |-------|-------------|--------|
 | Ajustes tipados | `core/config.py`: un solo objeto validado, `config.json` y valores por defecto | ✅ |
-| Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ⚠️ pendiente |
+| Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ✅ |
 | Panel mínimo | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar y estado | ⚠️ pendiente |
 | Vista de chat | Transcripción, texto de Niu en streaming y métricas por turno | ⚠️ pendiente |
 | Ajustes en la UI | 10 esenciales, avanzados plegados, «restaurar» y «probar voz» | ⚠️ pendiente |

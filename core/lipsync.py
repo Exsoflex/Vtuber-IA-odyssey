@@ -45,6 +45,7 @@ import asyncio
 import ctypes
 import sys
 import time
+from collections.abc import Callable
 from typing import AsyncIterator
 
 import numpy as np
@@ -474,6 +475,7 @@ async def hablar_por_partes(
     archivo_audio: str = "core/voz_temp.mp3",
     voz: str | None = None,
     medidas: dict[str, float] | None = None,
+    al_hablar: Callable[[int, float], None] | None = None,
 ) -> str:
     """Habla mientras el texto todavía se está escribiendo.
 
@@ -503,6 +505,9 @@ async def hablar_por_partes(
         medidas: si se pasa, se anotan `texto` (espera hasta la primera frase),
             `sintesis` y `preparacion` (de esa primera parte), `voz` (duración
             total de lo dicho), `partes` y `generando` (lo que tardó el cerebro).
+        al_hablar: si se pasa, se llama con `(número_de_parte, duración)` justo
+            antes de que esa parte empiece a sonar. Lo usa el motor para saber
+            cuándo pasa de «pensando» a «hablando» sin adivinar por el texto.
 
     Returns:
         El texto completo que se dijo, para poder revisarlo después (por
@@ -548,6 +553,8 @@ async def hablar_por_partes(
         while (audio := await cola_audio.get()) is not None:
             partes += 1
             duracion += audio.duracion
+            if al_hablar is not None:
+                al_hablar(partes, audio.duracion)
             await decir(audio, etiqueta=f" parte {partes}:")
         medidas["partes"] = partes
         medidas["voz"] = duracion

@@ -349,6 +349,18 @@ def reproducir_audio(audio: AudioPreparado) -> None:
     print("[TTS] Reproducción completada")
 
 
+def detener_reproduccion() -> None:
+    """Corta el audio que esté sonando ahora mismo.
+
+    `reproducir_audio` bloquea el hilo en `sd.wait()`, así que cancelar la
+    tarea de asyncio no basta: el hilo seguiría sonando hasta el final de la
+    frase. `sd.stop()` termina el stream y desbloquea esa espera. Es seguro
+    llamarlo aunque no haya nada sonando.
+    """
+    if SOUNDDEVICE_AVAILABLE:
+        sd.stop()
+
+
 # ─── Atajo para pruebas de audio (sin avatar) ──────────────────────────
 
 
