@@ -137,18 +137,19 @@ El último tramo fue el audio: la boca se movía pero no se oía nada. La señal
 
 # 🎯 FASE 2.8: LATENCIA
 
-La beta `v0.1.0-beta` ya conversa de punta a punta. El problema deja de ser «¿funciona?» y pasa a ser «¿se siente como una conversación?». Objetivo: de 10,7 s a unos 2 s hasta la primera palabra.
+La beta `v0.1.0-beta` ya conversa de punta a punta. El problema deja de ser «¿funciona?» y pasa a ser «¿se siente como una conversación?». Objetivo: de 10,7 s a unos 2 s hasta la primera palabra. Conseguido en `v0.2.0-beta`: **1,95 s**.
 
 | Tarea | Descripción | Estado |
 |-------|-------------|--------|
 | Cronómetro por etapa | `main.py` imprime STT, cerebro, TTS, preparar y el total hasta el primer sonido | ✅ |
 | Whisper rápido | `large-v3-turbo` + `beam_size=1`: 5,94 s → 0,45 s con el mismo texto | ✅ |
-| Silencio de corte | 1,0 s → 0,6 s, configurable con `NIU_SILENCIO_FINAL` | ✅ |
+| Silencio de corte | 1,0 s → 0,6 s y de vuelta a 0,9 s: por debajo partía frases largas. Configurable con `NIU_SILENCIO_FINAL` | ✅ |
 | Modelo caliente | `preparar()` en el proveedor LLM: la carga se paga al arrancar, no en la primera frase | ✅ |
 | No descargar el modelo | `keep_alive` de 30 min en lugar de los 5 min por defecto | ✅ |
 | Comprobar la VRAM | `turbo` (1,6 GB) + Ollama (4,4 GB) = 5797/6141 MiB, sin caídas a CPU | ✅ |
-| Tubería por frases | Cerebro en streaming → cortar por frase → sintetizar → encolar reproducción | ⚠️ pendiente |
-| Respuestas más cortas | Ahora duran 15 s de audio: no bloquean con streaming, pero alargan el turno | ⚠️ pendiente |
+| Tubería por frases | Cerebro en streaming → `core/frases.py` → sintetizar → encolar reproducción, tres etapas solapadas | ✅ |
+| Tope de tiempo en el TTS | Edge-TTS se quedó colgado >5 min sin dar error: 15 s y 2 intentos por frase | ✅ |
+| Respuestas más cortas | Duran 15-17 s de audio: ya no bloquean, pero alargan el turno antes de poder hablar otra vez | ⚠️ pendiente |
 | Barge-in | Poder interrumpir a Niu mientras habla | ⚠️ pendiente |
 
 ### Criterio de éxito
@@ -156,8 +157,8 @@ La beta `v0.1.0-beta` ya conversa de punta a punta. El problema deja de ser «¿
 ```text
 silencio → primer sonido ≤ 2 s, y la boca sigue cuadrando con la voz
 
-presupuesto previsto:
-  VAD 0,6 s | STT 0,45 s | primera frase del LLM 0,6 s | TTS de esa frase 0,6 s
+medido: STT 0,45 s | 1ª frase 1,14 s | TTS 0,78 s | preparar 0,03 s
+        → primer sonido 1,95 s, con la boca cuadrando en las 4 partes
 ```
 
 ### Pregunta guía del hito
@@ -175,6 +176,8 @@ el reloj de pared, costaba 5,9.
 El primer reparto se hizo a ojo y colocaba el 40 % en la transcripción. Medido, era el 55 %. Y el «delay de 16-20 s» incluía el tiempo que el propio Héctor pasa hablando: el silencio real era de 10-11 s.
 
 El aprendizaje más útil no fue el modelo nuevo, sino **dónde se paga cada coste**. Cargar un modelo cuesta lo mismo siempre; la pregunta es si se paga al arrancar o en mitad de la primera frase.
+
+La tubería por frases añadió la otra lección: el problema no era que una etapa fuera lenta, sino **el orden**. Esperar la respuesta completa para decir la primera palabra era tirar 3,8 s de trabajo ya hecho.
 
 ---
 

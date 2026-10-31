@@ -59,14 +59,20 @@ STTProvider (NIU_STT=whisper | gemini) → texto
         ↓
 core/brain.py
         ↓
-LLMProvider (por defecto OllamaAdapter → /api/chat)
+LLMProvider (por defecto OllamaAdapter → /api/chat, en streaming)
         ↓
-respuesta
+core/frases.py  (corta el texto en frases según llega)
         ↓
-core/lipsync.py  (sintetiza, calcula la boca y reproduce)
+core/lipsync.py → hablar_por_partes: tres etapas solapadas por colas
+        texto → síntesis → reproducción + boca
         ├── core/tts.py → MP3 → endpoint de salida de Windows (auriculares DGM20)
         └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
+
+Las tres etapas del final **no van en fila**: mientras una parte suena, la
+siguiente se está sintetizando y el cerebro sigue escribiendo la tercera. Por
+eso el primer sonido depende de la primera frase (1,95 s medidos) y no de la
+respuesta completa.
 
 ### Estado funcional documentado
 
@@ -81,6 +87,9 @@ core/lipsync.py  (sintetiza, calcula la boca y reproduce)
 - ✅ Oído independiente del motor: `STTProvider` con adaptadores `whisper` (local) y `gemini` (nube), elegido con `NIU_STT`.
 - ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
 - ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
+- ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
+- ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
+- ✅ 44 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, envolvente del lip sync y el tope de tiempo del TTS.
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -171,14 +180,16 @@ GOOGLE_API_KEY=tu_api_key
 
 ## 🧪 Problema actual
 
-El backend local ya está integrado y responde, el oído funciona de extremo a extremo, la boca se mueve con la voz y el audio sale por los auriculares. Los puntos débiles conocidos ahora son:
+El backend local ya está integrado y responde, el oído funciona de extremo a extremo, la boca se mueve con la voz mientras suena (parte a parte), el audio sale por los auriculares y la conversación ya se siente fluida: **1,95 s hasta la primera palabra**. Los puntos débiles conocidos ahora son:
 
 - Las expresiones emocionales usan hotkeys (`MouthSmile`, `MouthFrown`...) que no existen en el modelo cargado.
-- El TTS bloquea el bucle mientras habla (no hay barge-in).
+- El TTS bloquea el bucle mientras habla (no hay barge-in): no se puede interrumpir a Niu.
 - No hay wake word: Niu transcribe cualquier cosa que oiga mientras el bucle está activo.
-- Hay tests de la envolvente (`tests/`), pero no del cerebro ni del adaptador LLM.
+- Las respuestas duran 15-17 s de audio; con streaming ya no bloquean, pero alargan el turno antes de poder volver a hablar.
+- Los mensajes técnicos del TTS se mezclan con el texto de Niu en la consola, porque ahora ocurren a la vez.
+- Hay tests de la envolvente, del corte de frases y del tope de tiempo del TTS, pero no del cerebro ni del adaptador LLM.
 
-**Objetivo inmediato:** convertir cerebro → TTS → reproducción en una tubería por frases (streaming), para que la primera palabra suene a ~1,2 s en vez de a ~4,7 s. Después, logging y tests del cerebro.
+**Objetivo inmediato:** probar la tubería con la voz real de Héctor y afinar lo que se note (pausas entre partes, respuestas más cortas). Después, barge-in y logging.
 
 ### Caso resuelto: «Niu responde pero no se la oye»
 
@@ -296,6 +307,7 @@ Qué se hizo, con el ahorro medido de cada cosa:
 | `preparar()` del LLM al arrancar | primer turno 9,48 s | 2,6–4,2 s |
 | `keep_alive` 5 min → 30 min | una pausa recargaba el modelo | sigue cargado |
 | `silencio_final` 1,0 → 0,6 s | 1,0 s | 0,6 s |
+| … y de vuelta a 0,9 s | cortaba frases largas | 0,9 s |
 
 Por qué funciona cada uno:
 
@@ -307,7 +319,37 @@ Riesgo comprobado antes de adoptar `turbo`: la RTX 4050 tiene 6 GB y los dos mod
 
 Resultado: primer sonido de **10,7 s → 4,7 s** (sin contar STT, medido por teclado). Con el micrófono y `turbo` queda en ~5 s.
 
-Lo que falta, y es el cambio grande: `main.py` sigue esperando la respuesta **completa** del cerebro (3,8 s) antes de sintetizar. Con `procesar_mensaje_streaming`, el primer token llega a los 0,27 s y la primera frase completa a los 0,62 s: sintetizando esa primera frase mientras el modelo sigue escribiendo, se empezaría a hablar en ~1,2 s.
+Quedaba el cambio grande: `main.py` seguía esperando la respuesta **completa** del cerebro (3,8 s) antes de sintetizar, aunque el primer token llegaba a los 0,27 s. Se resolvió con la tubería por frases (ver el caso siguiente).
+
+### Caso resuelto: «habla, pero tarda en arrancar»
+
+Síntoma: con `large-v3-turbo` y el cerebro precalentado, el primer sonido era de ~4,7 s. El reparto decía que ~3,8 s eran el cerebro esperando la respuesta entera, y ~0,6 s el TTS.
+
+La clave medida: con `procesar_mensaje_streaming`, el **primer token** llega a los **0,27 s** y la **primera frase completa** a los **0,62 s**. Es decir, se estaba esperando a tener 15 s de texto para poder decir los primeros 2 s.
+
+Qué se hizo: dejar de tratar cerebro, TTS y reproducción como tres pasos en fila y convertirlos en tres etapas solapadas conectadas por colas.
+
+```text
+generar_texto  →  sintetizar  →  reproducir + boca
+   (cola)           (cola)
+```
+
+Mientras una parte suena, la siguiente se sintetiza, y el cerebro sigue escribiendo la tercera. Nadie espera a nadie.
+
+| | antes | después |
+|---|---|---|
+| primer sonido | 4,7 s | **1,95 s** |
+| boca | 1 bloque de 605 frames | 4 partes, 80/80, 161/161, 332/332, 131/131 |
+
+Los tres problemas que hubo que resolver, y ninguno es de rendimiento:
+
+- **Dónde cortar el texto.** El corte no se puede hacer mirando solo el final del buffer: `"3." + "5"` es un decimal y `"..."` llega punto a punto. La regla es *signo final seguido de espacio*, y eso resuelve de paso los decimales, los enlaces (`niu.dev`) y los emojis compuestos (el corte siempre cae en un espacio).
+- **Los puntos suspensivos no cierran frase.** Niu escribe «bueno... o sea... este...» constantemente. Si cada uno cerrara frase, cada duda sería un trozo de audio con su propia petición y su propia pausa: el habla sonaría troceada justo donde debe sonar natural. Es una decisión sobre *cómo habla el personaje*, no sobre el código.
+- **Un servicio externo puede dejar de contestar.** Un turno se quedó colgado más de 5 minutos dentro de `comunicador.save()` de Edge-TTS, sin excepción y sin error. Sin tope de tiempo, una petición perdida congela la conversación para siempre. Ahora hay 15 s y 2 intentos por frase: se pierde una frase, no el turno.
+
+Efecto secundario del corte: aparecen trozos que solo contenían emojis (`"🚀✨"`). No son un error; se detectan antes de llamar al servicio y se saltan.
+
+Coste de esta arquitectura: ya no se tiene la frase entera antes de hablar, así que **no se puede saber la duración total ni elegir la expresión del avatar al principio** — hay que decidir parte a parte o al final (lo que devuelve `hablar_por_partes`). Y los mensajes técnicos del TTS se mezclan con el texto de Niu en la consola, porque ahora ocurren a la vez.
 
 ### Caso resuelto: «el micrófono no entendía»
 
@@ -355,7 +397,7 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Comprobar hipótesis con experimentos controlados en vez de cambiar cosas a ciegas.
 - Distinguir «el servicio no puede» de «el cliente lo usa mal» (el caso de la inyección de parámetros).
 - Medir un bucle de tiempo real y ajustar la tasa a lo que el sistema sostiene de verdad.
-- Escribir tests para funciones puras (`tests/test_envolvente.py`).
+- Escribir tests para funciones puras (`tests/test_envolvente.py`) y para la tubería asíncrona.
 
 ### Prioridad de aprendizaje actual
 
@@ -390,6 +432,11 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Mover el coste, no eliminarlo**: cargar un modelo cuesta lo mismo tarde o temprano. El truco es pagarlo al arrancar, cuando nadie espera respuesta, en vez de en la primera frase.
 - **`keep_alive` y la memoria de un servidor de modelos**: un modelo local puede descargarse solo tras unos minutos de inactividad. Para una conversación con pausas, eso significa volver a pagar la carga varias veces.
 - **VRAM es un recurso compartido**: dos modelos en la misma GPU compiten. Antes de cambiar uno, comprobar que los dos caben; si no, el segundo cae a CPU y gana el que parecía la mejora.
+- **Tubería con colas en vez de pasos en fila**: cerebro, TTS y reproducción no tienen por qué esperarse. Con una cola entre cada uno, cada etapa trabaja mientras la siguiente consume lo anterior, y el tiempo hasta la primera palabra depende de la primera frase, no de la respuesta entera.
+- **Cortar texto que todavía se está escribiendo**: el corte no puede mirar solo el final del buffer; hay que decidir con una regla estable («signo final seguido de espacio») porque el fragmento puede acabar justo en mitad de un decimal, unos puntos suspensivos o un emoji.
+- **La puntuación es una decisión sobre el personaje, no sobre el código**: que los «...» no cierren frase no es un detalle técnico; es lo que evita que cada duda de Niu suene como una frase nueva.
+- **Todo servicio externo necesita un tope de tiempo**: Edge-TTS dejó de contestar sin cerrar la conexión y el sistema esperó más de 5 minutos. Sin `timeout` no hay error que capturar, solo un cuelgue silencioso. Y tras un fallo hay que crear un objeto nuevo si el anterior se consumió.
+- **Un test puede simular lo que no se puede provocar**: esperar a que un servicio se caiga justo ahora es imposible, pero sustituir su clase por un doble que se cuelga prueba el comportamiento igual, en milisegundos.
 
 ### Aún no asumir dominio completo de
 
@@ -407,9 +454,10 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Falta `GeminiAdapter` para volver a usar la nube.
 - Configuración pendiente de migrar a settings tipados.
 - Logging profesional pendiente.
-- Tests unitarios pendientes del cerebro y del adaptador LLM (la envolvente del lip sync ya los tiene en `tests/`).
-- Interrupción de TTS pendiente.
-- Streaming de audio pendiente.
+- Tests unitarios pendientes del cerebro y del adaptador LLM (la envolvente del lip sync, el corte de frases y el tope de tiempo del TTS ya los tienen en `tests/`).
+- Interrupción de TTS pendiente (barge-in).
+- El texto de Niu y los mensajes técnicos del TTS se mezclan en la consola durante el streaming.
+- Las frases se sintetizan y reproducen de una en una: entre una parte y otra puede notarse una pausa si el TTS tarda más que la duración de la anterior (no se precargan varias por adelantado).
 - Detección de voz basada en RMS (sensible al ruido de fondo: una tos o un golpe en la mesa corta la frase).
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
