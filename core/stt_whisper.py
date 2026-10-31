@@ -12,7 +12,9 @@ Variables de entorno:
     NIU_WHISPER_MODELO       large-v3 (por defecto), medium, small, base
     NIU_WHISPER_DISPOSITIVO  auto (por defecto), cuda, cpu
     NIU_WHISPER_HILOS        hilos de CPU cuando se usa int8
-    NIU_STT_PROMPT           contexto que se le da al decoder (ver abajo)
+    NIU_STT_PROMPT           contexto que se le da al decoder. Por defecto sale
+                             del perfil de idioma (`core/idiomas.py`), para que
+                             el oído y la boca apunten al mismo idioma.
 """
 
 import asyncio
@@ -21,21 +23,10 @@ import os
 
 import numpy as np
 
+from core.idiomas import IDIOMA, IDIOMAS
 from core.stt_provider import normalizar_pico, pcm_a_float, remuestrear
 
 FS_MODELO = 16000   # Whisper trabaja internamente a 16 kHz
-
-# Whisper elige las palabras también por contexto. Sin contexto, "Niu" (un
-# nombre propio que no existe en español) se convierte en "New", "ni", "un",
-# y las preguntas quedan a medias ("¿qué hora son?" en vez de "¿qué hora es?").
-# Este texto es solo una pista: no se transcribe, se usa para que el decoder
-# prefiera ese vocabulario y ese estilo.
-PROMPT_POR_DEFECTO = (
-    "Conversación hablada en español con Niu, una asistente virtual. "
-    "El usuario se dirige a ella por su nombre: Niu. "
-    "Frases habituales: hola Niu, ¿cómo estás?, ¿qué hora es?, "
-    "¿qué día es hoy?, ¿me escuchas?, pon música, abre el navegador."
-)
 
 
 def _preparar_cuda() -> None:
@@ -66,10 +57,14 @@ class WhisperSTT:
         dispositivo: str | None = None,
         hilos: int | None = None,
         prompt: str | None = None,
+        idioma: str | None = None,
     ) -> None:
         self.modelo_nombre = modelo or os.getenv("NIU_WHISPER_MODELO", "large-v3-turbo")
         self.dispositivo = (dispositivo or os.getenv("NIU_WHISPER_DISPOSITIVO", "auto")).lower()
         self.hilos = hilos or int(os.getenv("NIU_WHISPER_HILOS", "0")) or None
+
+        # Idioma que se espera oír. None = detección automática.
+        self.idioma = idioma
 
         # Cuántas hipótesis explora el decodificador. `beam_size=5` calcula
         # cinco y se queda con la mejor: más calidad, ~5 veces más trabajo.
@@ -81,9 +76,27 @@ class WhisperSTT:
         self.beam_size = int(os.getenv("NIU_WHISPER_BEAM", "1"))
         # "" (vacío) desactiva el contexto a propósito.
         if prompt is None:
-            prompt = os.getenv("NIU_STT_PROMPT", PROMPT_POR_DEFECTO)
+            # El prompt tiene que hablar el mismo idioma que el oído. Sin esto,
+            # el decoder parte de un texto en español y "oye" español aunque le
+            # hables en inglés: la transcripción sale en el idioma equivocado y
+            # Niu responde a algo que no se dijo.
+            perfil = self._perfil()
+            prompt = os.getenv(
+                "NIU_STT_PROMPT", perfil.prompt_stt if perfil else ""
+            )
         self.prompt = prompt.strip() or None
         self._modelo = None
+
+    def _perfil(self):
+        """Perfil del idioma que se espera oír, o None si es desconocido.
+
+        Con `idioma=None` (automático) se usa el perfil activo: Niu va a
+        contestar en ese idioma de todas formas, así que el oído y la boca
+        apuntan al mismo sitio aunque la detección quede desactivada.
+        """
+        if self.idioma is None:
+            return IDIOMA
+        return IDIOMAS.get(self.idioma.strip().lower())
 
     # ------------------------------------------------------------------
     def _cargar(self):
@@ -119,7 +132,9 @@ class WhisperSTT:
         # y no en medio de una conversación.
         try:
             list(self._modelo.transcribe(
-                np.zeros(FS_MODELO, dtype=np.float32), language="es", beam_size=1
+                np.zeros(FS_MODELO, dtype=np.float32),
+                language=self.idioma or IDIOMA.codigo,
+                beam_size=1,
             )[0])
         except Exception as e:
             print(f"[STT] Fallo al calentar ({type(e).__name__}); reintento en CPU int8")
@@ -157,7 +172,9 @@ class WhisperSTT:
 
         segmentos, _ = modelo.transcribe(
             x,
-            language=idioma or None,        # None = detección automática (es/en/...)
+            # None = detección automática. Si se construyó con un idioma y no
+            # llega otro por parámetro, se respeta el del constructor.
+            language=idioma or self.idioma,
             beam_size=self.beam_size,
             vad_filter=True,                # descarta lo que no es voz
             condition_on_previous_text=False,  # evita que se "invente" una frase arrastrada

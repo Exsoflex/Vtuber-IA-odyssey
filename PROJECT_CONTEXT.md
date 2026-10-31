@@ -68,7 +68,7 @@ core/frases.py  (corta el texto en frases según llega)
 core/lipsync.py → hablar_por_partes: tres etapas solapadas por colas
         texto → síntesis → reproducción + boca
         ├── core/tts.py → MP3 → recorte de silencio → salida de Windows
-        ├── core/idiomas.py decide voz y reglas de estilo (NIU_IDIOMA)
+        ├── core/idiomas.py decide voz, tono, reglas de estilo y prompt del STT (NIU_IDIOMA)
         └── envolvente (40 Hz) → VTS: NiuMouthOpen → ParamMouthOpenY
 ```
 
@@ -91,7 +91,8 @@ respuesta completa.
 - ✅ Whisper `large-v3-turbo` en GPU (RTX 4050): **0,45 s** por frase de 8 s (antes 5,94 s con `large-v3` y `beam 5`). Fallback a CPU int8 si no hay GPU. Configurable con `NIU_WHISPER_MODELO` y `NIU_WHISPER_BEAM`.
 - ✅ Cronómetro por turno en `main.py`: imprime el tiempo de cada etapa y el total hasta el primer sonido.
 - ✅ **Voz por partes (streaming)**: el cerebro escribe, `core/frases.py` corta en frases y cada una se sintetiza mientras la anterior suena. Verificado de punta a punta: **primer sonido 1,95 s** (antes 4,7 s) con 4 partes y la boca cuadrando en todas.
-- ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige la voz y las reglas de estilo. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas. La voz se puede forzar con `NIU_VOZ`.
+- ✅ **Perfiles de idioma** (`core/idiomas.py`): `NIU_IDIOMA=es|en` elige voz, tono, reglas de estilo y **prompt del STT**. En inglés Niu responde con contracciones y muletillas nativas, sin traducir las españolas, con la voz de Aria ligeramente grave (`-15Hz`). La voz y el tono se pueden forzar con `NIU_VOZ` / `NIU_TONO`.
+- ✅ **Oído en el idioma del perfil**: `idioma_stt()` devuelve el código del perfil salvo que `NIU_STT_IDIOMA` diga otra cosa. Antes estaba en automático con un prompt en español, y Whisper transcribía el inglés en español.
 - ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
 - ✅ 70 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync y el tope de tiempo del TTS.
@@ -185,12 +186,14 @@ GOOGLE_API_KEY=tu_api_key
 
 | variable | por defecto | para qué |
 |---|---|---|
-| `NIU_IDIOMA` | `es` | perfil de idioma: voz y reglas de estilo (`es`, `en`) |
+| `NIU_IDIOMA` | `es` | perfil de idioma: voz, tono, reglas de estilo y prompt del STT (`es`, `en`) |
 | `NIU_VOZ` | la del perfil | forzar una voz concreta de Edge-TTS |
+| `NIU_TONO` | la del perfil (`+0Hz` es, `-15Hz` en) | forzar el tono de Edge-TTS (`-25Hz`) |
 | `NIU_SALIDA` | dispositivo de Windows | forzar el dispositivo de salida de la voz |
 | `NIU_MIC` | `DGM20 USB Microphone` | nombre del micrófono |
 | `NIU_SILENCIO_FINAL` | `0.9` | silencio que hay que oír para cortar la frase |
-| `NIU_STT_IDIOMA` | automático | fijar el idioma del STT (`en`, `es`) |
+| `NIU_STT_IDIOMA` | el del perfil | forzar el idioma del STT (`en`, `es`); `auto` = detección automática |
+| `NIU_STT_PROMPT` | el del perfil | contexto que se le da al decoder de Whisper |
 | `NIU_WHISPER_MODELO` | `large-v3-turbo` | modelo de Whisper |
 | `NIU_WHISPER_BEAM` | `1` | hipótesis del decodificador (más = más calidad y más lento) |
 | `NIU_TTS_TIMEOUT` | `15` | segundos antes de rendirse con una frase |
@@ -210,7 +213,7 @@ El backend local ya está integrado y responde, el oído funciona de extremo a e
 - Los mensajes técnicos del TTS se mezclan con el texto de Niu en la consola, porque ahora ocurren a la vez.
 - Hay tests de la envolvente, del corte de frases, del recorte de silencio y de los idiomas, pero no del cerebro ni del adaptador LLM.
 
-**Objetivo inmediato:** crear contenido en inglés con la voz elegida por Héctor (`NIU_IDIOMA=en`) y observar si la personalidad se sostiene en inglés. Después: respuestas más cortas, modo espejo de idioma y barge-in.
+**Objetivo inmediato:** crear contenido en inglés con `NIU_IDIOMA=en` (voz de Aria) y observar si la personalidad se sostiene en inglés. Después: respuestas más cortas, modo espejo de idioma y barge-in.
 
 ### Caso resuelto: «Niu responde pero no se la oye»
 
@@ -380,7 +383,7 @@ Causa: **nadie le había dicho en qué idioma hablar**. El idioma vive en tres s
 
 | dónde | estado anterior |
 |---|---|
-| STT (`language=`) | detección automática: el inglés se transcribía bien |
+| STT (`language=`) | detección automática, con un `initial_prompt` en español: el inglés se transcribía **en español** (ver el caso siguiente) |
 | prompt de personalidad | escrito en español, sin ninguna regla de idioma |
 | voz de Edge-TTS | `es-MX-DaliaNeural`, fija |
 
@@ -415,6 +418,29 @@ El segundo arreglo tiene una excepción que salió de medir: aplicado también a
 | audio dicho | 26 s | 17 s |
 | partes (inglés) | 9 | 4 |
 | primer sonido | 1,09 s | **0,95 s** |
+
+### Caso resuelto: «hablo en inglés y la transcripción sale en español»
+
+Síntoma: el renglón `👤 Tú:` aparecía en español aunque se hablara en inglés: «¿could usted decir algo en inglés para mí?». Como el cerebro contesta a la transcripción, la conversación salía torcida aunque las reglas de idioma ya estuvieran bien: el modelo recibía una frase mezclada y a veces seguía en español.
+
+Causa: dos empujones hacia el español en el mismo sitio.
+
+1. `NIU_STT_IDIOMA` estaba vacío por defecto, o sea **detección automática**: Whisper decidía en qué idioma estaba oyendo.
+2. El `initial_prompt` de Whisper decía «Conversación hablada en español con Niu…».
+
+El segundo pesa más de lo que parece. Medido con el mismo audio en inglés y el mismo modelo:
+
+| configuración | transcripción |
+|---|---|
+| auto + prompt español | «Ok, so, hey Niu. **¿Cómo estás hoy? Estoy solo probando si me entiendes en inglés**…» |
+| `language="en"` + prompt español | **igual de mala**: el prompt manda más que el flag |
+| `language="en"` + prompt inglés | correcta, palabra por palabra |
+
+O sea: fijar el idioma a medias no habría servido. El `initial_prompt` no es un adorno: es contexto que el decodificador usa para elegir palabras, y con 10 s de audio puede arrastrar todo el texto a su idioma.
+
+Arreglo: el perfil lleva ahora `prompt_stt`, y el idioma del oído se resuelve en **una sola función** (`idioma_stt()` en `core/stt.py`) que por defecto devuelve el código del perfil. Hablar y oír apuntan al mismo sitio por construcción, no por acordarse de configurar dos variables. `NIU_STT_IDIOMA=auto` sigue existiendo como salida de emergencia para quien alterna idiomas de verdad.
+
+Verificado: `[STT] Motor: whisper | idioma: en` al arrancar con `NIU_IDIOMA=en`, y transcripción inglesa correcta sobre audio sintetizado.
 
 ### Caso resuelto: «el micrófono no entendía»
 
@@ -507,6 +533,7 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Los servicios externos rellenan el audio**: Edge-TTS añade ~0,85 s de silencio al final de cada frase. En un audio entero es invisible; al trocearlo, cada trozo arrastra su relleno y el silencio se convierte en pausa. Hay que medir los bordes, no solo la duración.
 - **Política y mecanismo separados**: `extraer_frases` corta (mecanismo); cuándo *conviene* cortar (mínimo de caracteres, primera frase exenta) es política y la aplican los generadores. Así el mecanismo se puede probar con y sin política.
 - **Los tests de propiedad encuentran bugs tontos y reales**: comprobar que el texto reconstruido es igual al original descubrió que al acumular frases cortas se comía un espacio y las palabras se pegaban («¡Hola!Sí»). Ningún test de «contiene esta frase» lo habría visto.
+- **Un flag no basta si el contexto dice otra cosa**: poner `language="en"` en Whisper y dejar un `initial_prompt` en español seguía transcribiendo en español. El prompt del decoder es contexto que se usa para elegir palabras, no documentación decorativa. La solución no fue añadir otra variable, sino hacer que el prompt salga del **mismo dato** que el idioma.
 
 ### Aún no asumir dominio completo de
 

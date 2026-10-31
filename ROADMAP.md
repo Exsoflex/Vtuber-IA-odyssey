@@ -192,7 +192,9 @@ Objetivo: poder crear contenido en inglés sin bifurcar el código, y que Niu su
 | Reglas de estilo propias | Muletillas nativas y prohibición de traducir las españolas en literal | ✅ |
 | Voz por idioma | La voz sale del perfil; `NIU_VOZ` la fuerza sin tocar código | ✅ |
 | Muestras de voz | `muestras_voces/`: la misma frase con 4 voces inglesas para elegir de oído | ✅ |
-| Voz elegida | Confirmar con Héctor cuál se queda como `en-US-*` por defecto | ⚠️ pendiente |
+| Voz elegida | `en-US-AriaNeural` con tono `-15Hz`; variantes en `muestras_voces/niu_aria_*.mp3` | ✅ |
+| Tono por idioma | El tono sale del perfil; `NIU_TONO` lo fuerza | ✅ |
+| STT en el idioma del perfil | `idioma_stt()` + `prompt_stt`: hablar y oír apuntan al mismo idioma | ✅ |
 | Personalidad en inglés | Comprobar con conversación real que el personaje no se desdibuja | ⚠️ pendiente |
 | Modo espejo | Responder en el idioma del usuario: requiere el idioma detectado por Whisper y voz por turno | ⚠️ pendiente |
 | Más idiomas | Añadir una entrada a la tabla (francés, japonés) | ⚠️ pendiente |
@@ -211,6 +213,8 @@ valores con los que lo hace?
 ### Lo que costó entenderlo
 
 El primer impulso fue «responde en inglés» y ya está. Pero el prompt está escrito en español y con muletillas españolas: el modelo las traducía y Niu decía *«well... I mean... this...»*. El idioma no es solo la voz ni la instrucción; es también el registro.
+
+Y faltaba la otra mitad de la tubería: **el oído**. El perfil elegía qué decía Niu, pero Whisper seguía decidiendo por su cuenta qué estaba oyendo, con un `initial_prompt` en español. Medido: con `language="en"` y un prompt español la transcripción seguía saliendo en español. El idioma no es una variable, es un dato que tiene que atravesar la tubería entera: oído, cerebro y voz.
 
 ---
 

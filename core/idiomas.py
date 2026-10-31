@@ -29,6 +29,20 @@ es una traducción.
 Por eso cada perfil trae sus propias muletillas y una regla explícita de no
 traducir literalmente.
 
+El perfil también decide qué **escucha** Niu, no solo qué dice
+--------------------------------------------------------------
+El idioma no vive en un solo sitio. Si el perfil solo eligiera la voz y las
+reglas del modelo, quedaría el otro extremo de la tubería: el reconocimiento de
+voz. Whisper, sin que nadie le diga nada, decide por su cuenta en qué idioma
+está oyendo. Con una frase corta y un `initial_prompt` en español, tiende a
+"oír" español aunque le estés hablando en inglés: transcribe «¿could usted
+decir algo en inglés?» y a partir de ahí todo va mal, porque Niu responde a una
+transcripción que no es lo que se dijo.
+
+Por eso cada perfil lleva también `prompt_stt`: el texto que sesga el
+decodificador hacia ese idioma y hacia el vocabulario de la casa («Niu»).
+Hablar y oír tienen que apuntar al mismo idioma.
+
 Uso
 ---
 Se elige con una variable de entorno, sin tocar código:
@@ -52,20 +66,27 @@ class Idioma:
         codigo: código ISO para los motores de voz (`es`, `en`).
         voz: nombre exacto de la voz de Edge-TTS. Tiene que ser de ese idioma:
             una voz española leyendo inglés suena a español leyendo inglés.
+        tono: tono de Edge-TTS en hercios (`+0Hz`, `-15Hz`). Bajar el tono
+            oscurece la voz; subirlo la vuelve más infantil.
         nombre: cómo se llama el idioma al hablarle al modelo ("inglés").
         reglas: bloque de prompt que fija el idioma y el registro.
+        prompt_stt: contexto para el reconocedor de voz. Sesga el idioma y el
+            vocabulario (nombre «Niu») hacia este perfil.
     """
 
     codigo: str
     voz: str
+    tono: str
     nombre: str
     reglas: str
+    prompt_stt: str
 
 
 ESPANOL = Idioma(
     codigo="es",
     # Voz natural de Edge-TTS en español. Dalia es mexicana y conversacional.
     voz="es-MX-DaliaNeural",
+    tono="+0Hz",
     nombre="español",
     reglas="""
 ## IDIOMA (REGLA DE ORO)
@@ -74,14 +95,25 @@ ESPANOL = Idioma(
 * Mantén los emojis con la misma frecuencia que en tus respuestas normales.
 * Límites: lenguaje limpio, sin groserías.
 """,
+    # Este texto no se transcribe: es una pista. Whisper elige las palabras por
+    # contexto y, sin él, "Niu" (nombre que no existe en español) se convierte
+    # en "New", "ni" o "un".
+    prompt_stt=(
+        "Conversación hablada en español con Niu, una asistente virtual. "
+        "El usuario se dirige a ella por su nombre: Niu. "
+        "Frases habituales: hola Niu, ¿cómo estás?, ¿qué hora es?, "
+        "¿qué día es hoy?, ¿me escuchas?, pon música, abre el navegador."
+    ),
 )
 
 INGLES = Idioma(
     codigo="en",
-    # Emma: "Cheerful, Clear, Conversational". Es la que mejor encaja con el
-    # registro de Niu entre las voces inglesas de Edge-TTS. Cambiable con
-    # NIU_VOZ; las alternativas están en muestras_voces/.
-    voz="en-US-EmmaNeural",
+    # Aria: "Positive, Confident". Elegida por Héctor de oído entre Emma, Ava y
+    # Ana. El tono va ligeramente por debajo de 0 Hz: quita brillo sin que la
+    # voz se vuelva madura (Ava, que era la alternativa cálida, resultaba
+    # demasiado grave para el personaje).
+    voz="en-US-AriaNeural",
+    tono="-15Hz",
     nombre="inglés",
     reglas="""
 ## LANGUAGE (GOLDEN RULE)
@@ -101,6 +133,15 @@ INGLES = Idioma(
 * Keep using emojis (✨, 🚀, 💻, 💖, 💫, ‼️, 💕) as often as you normally do.
 * Limits: clean language, no profanity.
 """,
+    # En inglés el prompt es lo que más pesa: sin él, el decoder parte del
+    # idioma que más ha visto (español) y transcribe sonidos ingleses con
+    # ortografía española. Con él, espera inglés y además reconoce «Niu».
+    prompt_stt=(
+        "Spoken conversation in English with Niu, a virtual assistant. "
+        "The user calls her by name: Niu. "
+        "Common phrases: hi Niu, how are you?, what time is it?, "
+        "what day is it today?, can you hear me?, play music, open the browser."
+    ),
 )
 
 IDIOMAS: dict[str, Idioma] = {

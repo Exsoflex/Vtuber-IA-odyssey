@@ -23,6 +23,7 @@ from core.stt import (
     SAMPLE_RATE,
     crear_proveedor_stt,
     grabar_hasta_silencio,
+    idioma_stt,
 )
 from core.lipsync import hablar_por_partes
 from core.vts_client import vts_client
@@ -36,8 +37,10 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 # NIU_MIC="Voicemeeter Out B2" en el .env.
 DISPOSITIVO_ENTRADA = os.getenv("NIU_MIC", "DGM20 USB Microphone")
 
-# "" o "auto" = que el motor detecte el idioma (sirve para español e inglés).
-IDIOMA_STT = os.getenv("NIU_STT_IDIOMA", "").strip().lower() or None
+# Idioma que se le pide al oído. Por defecto el del perfil (NIU_IDIOMA), para
+# que escuchar y contestar apunten al mismo idioma; "auto" vuelve a la
+# detección automática del motor.
+IDIOMA_STT = idioma_stt()
 
 
 async def _mostrando_el_texto(fragmentos):
@@ -159,13 +162,11 @@ async def main():
     # 1. Cerebro: Ollama local por defecto
     brain = NiuBrain()
 
-    # El perfil de idioma decide voz y reglas de estilo. Se imprime porque,
-    # si alguien olvidó cambiar NIU_IDIOMA, es mejor verlo al arrancar que
-    # descubrirlo cuando Niu contesta en el idioma equivocado.
-    print(f"[IDIOMA] Perfil: {IDIOMA.nombre} ({IDIOMA.codigo}) | voz: {tts.VOZ_NIU}")
-    if IDIOMA_STT is None:
-        print("[IDIOMA] STT: detección automática "
-              "(NIU_STT_IDIOMA=\"en\" para fijarlo)")
+    # El perfil de idioma decide voz, tono y reglas de estilo. Se imprime
+    # porque, si alguien olvidó cambiar NIU_IDIOMA, es mejor verlo al arrancar
+    # que descubrirlo cuando Niu contesta en el idioma equivocado.
+    print(f"[IDIOMA] Perfil: {IDIOMA.nombre} ({IDIOMA.codigo}) | "
+          f"voz: {tts.VOZ_NIU} | tono: {tts.TONO}")
 
     # Cargar el modelo ahora, no en mitad de la primera frase. Es opcional:
     # si el proveedor no lo soporta o falla, se sigue igual.

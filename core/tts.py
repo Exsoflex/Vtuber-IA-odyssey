@@ -25,7 +25,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 from core.audio_devices import buscar_dispositivo, buscar_salida_por_defecto
-from core.idiomas import VOZ
+from core.idiomas import IDIOMA, VOZ
 
 load_dotenv()
 
@@ -55,7 +55,9 @@ except ImportError:
 # código, y `NIU_IDIOMA` cambia de perfil.
 VOZ_NIU = VOZ
 VELOCIDAD = "+0%"              # Velocidad normal
-TONO = "+0Hz"                  # Edge-TTS usa Hz para el tono, no porcentaje
+# Edge-TTS usa hercios para el tono, no porcentaje. El valor sale del perfil:
+# en inglés Aria va ligeramente más grave para quitarle brillo.
+TONO = os.getenv("NIU_TONO", "").strip() or IDIOMA.tono
 
 TARGET_SAMPLE_RATE = 48000  # Hz; se remuestrea aquí para no depender del endpoint
 
