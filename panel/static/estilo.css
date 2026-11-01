@@ -520,6 +520,183 @@ body {
   word-break: break-word;
 }
 
+/* ─── Ajustes ──────────────────────────────────────────────────────────── */
+
+.ajustes-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.ajustes-cabecera h2 { margin: 0; }
+
+.ajustes-grupo {
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.ajustes-grupo:last-child { margin-bottom: 0; }
+
+.ajustes-grupo-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0 0 7px;
+  border-bottom: 1px solid var(--borde);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+.ajustes-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px 22px;
+}
+
+.ajustes-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ajustes-campo label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.ajustes-nombre {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+/* Solo en los ajustes que el motor captura al arrancar. */
+.ajustes-frio {
+  padding: 1px 7px;
+  border: 1px solid rgba(224, 161, 0, 0.3);
+  border-radius: 999px;
+  background: rgba(224, 161, 0, 0.13);
+  color: #8a6200;
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ajustes-unidad {
+  color: var(--tinta-suave);
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ajustes-control {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--borde-fuerte);
+  border-radius: 10px;
+  background: var(--superficie-fuerte);
+  color: var(--tinta);
+  font: inherit;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ajustes-control:focus-visible {
+  outline: 3px solid rgba(61, 123, 253, 0.35);
+  outline-offset: 1px;
+  border-color: var(--azul);
+}
+
+.ajustes-control:disabled { opacity: 0.55; }
+
+.ajustes-rango {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ajustes-rango input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--azul);
+}
+
+.ajustes-rango output {
+  min-width: 4.5ch;
+  text-align: right;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--tinta-suave);
+}
+
+.ajustes-nota {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--tinta-suave);
+}
+
+.ajustes-aviso {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: rgba(61, 123, 253, 0.07);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.ajustes-aviso[data-tipo="ok"] {
+  border-color: rgba(47, 191, 143, 0.35);
+  background: rgba(47, 191, 143, 0.09);
+}
+
+.ajustes-aviso[data-tipo="error"] {
+  border-color: rgba(229, 86, 106, 0.35);
+  background: rgba(229, 86, 106, 0.09);
+  color: #a92c3f;
+}
+
+.ajustes-avanzados {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--borde);
+}
+
+.ajustes-avanzados summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+.ajustes-avanzados summary:focus-visible {
+  outline: 3px solid rgba(61, 123, 253, 0.45);
+  outline-offset: 3px;
+}
+
+.ajustes-avanzados .ajustes-grupos { margin-top: 16px; }
+
 /* ─── Aviso de error ───────────────────────────────────────────────────── */
 
 .aviso {

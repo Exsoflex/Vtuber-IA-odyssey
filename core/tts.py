@@ -187,6 +187,8 @@ async def sintetizar_voz_async(
     texto: str,
     archivo_salida: str = "core/voz_temp.mp3",
     voz: str | None = None,
+    tono: str | None = None,
+    velocidad: str | None = None,
 ) -> bool:
     """Sintetiza texto a audio con Edge-TTS y lo guarda en disco.
 
@@ -195,14 +197,17 @@ async def sintetizar_voz_async(
         archivo_salida: Ruta del archivo de audio temporal.
         voz: Nombre de la voz de Edge-TTS. None = la de los ajustes activos
             (que a su vez puede ser la del perfil de idioma).
+        tono: Formato de Edge-TTS (`+0Hz`). None = el de los ajustes. Lo pasa
+            el panel para «probar voz» con valores que todavía no se guardaron.
+        velocidad: Formato de Edge-TTS (`+0%`). None = la de los ajustes.
 
     Returns:
         True si el archivo se generó y no está vacío.
     """
     ajustes = config.ajustes()
     voz = voz or voz_activa()
-    velocidad = ajustes.velocidad
-    tono = tono_activo()
+    velocidad = velocidad or ajustes.velocidad
+    tono = tono or tono_activo()
 
     try:
         print("🎙️ [TTS Edge]: Niu está preparando su voz...")

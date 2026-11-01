@@ -87,6 +87,42 @@
         <div><dt>Tono</dt><dd id="dato-tono">—</dd></div>
       </dl>
     </section>
+
+    <section class="tarjeta ancha" aria-labelledby="t-ajustes">
+      <div class="ajustes-cabecera">
+        <h2 id="t-ajustes">Ajustes</h2>
+        <div class="chat-botones">
+          <button type="button" class="boton-mini" id="btn-probar"
+                  title="Oír la voz con los valores del formulario, sin guardar">
+            Probar voz
+          </button>
+          <button type="button" class="boton-mini peligro-mini" id="btn-restaurar"
+                  title="Volver a los valores de fábrica">
+            Restaurar
+          </button>
+          <button type="button" class="boton-mini primario-mini" id="btn-guardar"
+                  disabled>
+            Guardar
+          </button>
+        </div>
+      </div>
+
+      <p class="ajustes-aviso" id="ajustes-aviso" hidden></p>
+
+      <div class="ajustes-grupos" id="ajustes-grupos">
+        <p class="nota">Cargando ajustes…</p>
+      </div>
+
+      <details class="ajustes-avanzados" id="ajustes-caja-avanzados" hidden>
+        <summary>Avanzados</summary>
+        <div class="ajustes-grupos" id="ajustes-avanzados"></div>
+      </details>
+
+      <datalist id="lista-voces"></datalist>
+      <datalist id="lista-entrada"></datalist>
+      <datalist id="lista-salida"></datalist>
+      <datalist id="lista-modelos"></datalist>
+    </section>
   </main>
 
   <p class="aviso" id="aviso" role="alert" hidden></p>

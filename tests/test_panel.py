@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 import panel.app as panel_app
 import panel.chat as panel_chat
+from core import config
 
 
 class MotorFalso:
@@ -273,3 +274,100 @@ def test_limpiar_vacia_el_chat_y_empieza_otra_sesion(cliente, tmp_path):
     assert datos["mensajes"] == []
     assert datos["archivo"] != archivo_anterior
     assert (tmp_path / archivo_anterior.split("/")[-1]).exists()
+
+
+# ─── Ajustes ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def ajustes_temporales(monkeypatch, tmp_path):
+    """Redirige `config.json` y parte de fábrica: no se toca el del proyecto."""
+    monkeypatch.setattr(config, "RUTA_CONFIG", tmp_path / "config.json")
+    original = config.ajustes()
+    config.fijar_ajustes(config.por_defecto())
+    try:
+        yield tmp_path / "config.json"
+    finally:
+        config.fijar_ajustes(original)
+
+
+def test_la_interfaz_puede_pedir_el_esquema_de_ajustes(cliente, ajustes_temporales):
+    c, _ = cliente
+
+    datos = c.get("/api/ajustes").json()
+
+    assert datos["valores"]["tono"] == ""
+    assert {campo["campo"] for campo in datos["campos"]} == set(datos["valores"])
+    assert datos["secciones"]["voz"] == "Voz"
+    assert any(campo["seccion"] == "avanzado" for campo in datos["campos"])
+
+
+def test_guardar_un_ajuste_desde_la_interfaz_lo_escribe_en_disco(
+    cliente, ajustes_temporales
+):
+    c, _ = cliente
+
+    respuesta = c.put("/api/ajustes", json={"tono": "+15Hz"})
+
+    assert respuesta.status_code == 200
+    datos = respuesta.json()
+    assert datos["valores"]["tono"] == "+15Hz"
+    assert datos["requiere_reinicio"] == []
+    assert "+15Hz" in ajustes_temporales.read_text(encoding="utf-8")
+
+
+def test_un_cambio_frio_dice_que_hay_que_reiniciar(cliente, ajustes_temporales):
+    c, _ = cliente
+
+    datos = c.put("/api/ajustes", json={"modelo_llm": "otro:7b"}).json()
+
+    assert datos["requiere_reinicio"] == ["modelo_llm"]
+
+
+def test_guardar_sin_cambios_se_rechaza(cliente, ajustes_temporales):
+    c, _ = cliente
+
+    respuesta = c.put("/api/ajustes", json={})
+
+    assert respuesta.status_code == 400
+
+
+def test_restaurar_devuelve_los_valores_de_fabrica(cliente, ajustes_temporales):
+    c, _ = cliente
+    c.put("/api/ajustes", json={"tono": "+20Hz"})
+
+    datos = c.post("/api/ajustes/restablecer").json()
+
+    assert datos["valores"]["tono"] == ""
+    assert config.ajustes().tono == ""
+
+
+def test_probar_voz_mientras_niu_habla_devuelve_conflicto(cliente):
+    c, motor = cliente
+    motor.estado = "hablando"
+
+    respuesta = c.post("/api/ajustes/probar-voz", json={"tono": "+0Hz"})
+
+    assert respuesta.status_code == 409
+    assert "hablando" in respuesta.json()["detail"]
+
+
+def test_las_listas_de_dispositivos_y_modelos_llegan_al_navegador(
+    cliente, monkeypatch
+):
+    c, _ = cliente
+    monkeypatch.setattr(panel_app, "listar_dispositivos",
+                        _devolver({"entrada": [{"nombre": "Mic"}],
+                                   "salida": [{"nombre": "Altavoces"}]}))
+    monkeypatch.setattr(panel_app, "listar_modelos",
+                        _devolver({"llm": ["qwen2.5:7b"]}))
+
+    assert c.get("/api/dispositivos").json()["entrada"][0]["nombre"] == "Mic"
+    assert c.get("/api/modelos").json()["llm"] == ["qwen2.5:7b"]
+
+
+def _devolver(datos):
+    async def falso(*args, **kwargs):
+        return datos
+
+    return falso

@@ -6,8 +6,9 @@ renderizador, el CSS moderno sale gratis y el panel comparte el bucle de
 `asyncio` con el motor. No hay IPC ni dos procesos que se puedan desincronizar.
 
 Qué hace ahora: arrancar y parar el motor, callar la voz, mostrar el estado de
-las piezas que pueden fallar (Ollama, VTube Studio, micrófono, TTS) y mantener
-el chat de la sesión. El chat llega por dos caminos que no compiten:
+las piezas que pueden fallar (Ollama, VTube Studio, micrófono, TTS), mantener
+el chat de la sesión y editar los ajustes de Niu. El chat llega por dos caminos
+que no compiten:
 
 - `POST /api/mensaje` para escribirle a Niu.
 - `/ws` para que el servidor empuje los mensajes según se producen. Sin
@@ -40,16 +41,35 @@ from core.audio_devices import buscar_dispositivo
 from core.idiomas import tono_activo, voz_activa
 from core.motor import MotorNiu
 from core.vts_client import vts_client
+from panel.ajustes import (
+    MotorOcupado,
+    URL_OLLAMA,
+    aplicar_ajustes,
+    descripcion_ajustes,
+    listar_dispositivos,
+    listar_modelos,
+    probar_voz,
+    restaurar_ajustes,
+)
 from panel.chat import Historial
 
 ESTATICOS = Path(__file__).resolve().parent / "static"
-URL_OLLAMA = "http://localhost:11434/api/tags"
 
 
 class MensajeEntrante(BaseModel):
     """Cuerpo de `POST /api/mensaje`: lo que el usuario escribe en el chat."""
 
     texto: str = ""
+
+
+class PruebaVoz(BaseModel):
+    """Valores para oír la voz **antes** de guardarlos. Todo opcional: lo que
+    falta se toma de los ajustes guardados."""
+
+    voz: str | None = None
+    tono: str | None = None
+    velocidad: str | None = None
+    idioma: str | None = None
 
 
 # ─── Comprobaciones de estado ──────────────────────────────────────────
@@ -241,5 +261,50 @@ def crear_app() -> FastAPI:
             pass
         finally:
             historial.desuscribir(cola)
+
+    # ─── Ajustes ───────────────────────────────────────────────────────
+
+    @app.get("/api/ajustes")
+    async def obtener_ajustes() -> dict[str, Any]:
+        return descripcion_ajustes()
+
+    @app.put("/api/ajustes")
+    async def guardar_ajustes(cambios: dict[str, Any]) -> dict[str, Any]:
+        """Valida, guarda en `config.json` y devuelve avisos y pendientes.
+
+        No devuelve 422 ante un valor raro: se corrige con aviso, igual que
+        hace `core/config.py` al arrancar. Rechazar dejaría la interfaz sin
+        saber qué hacer con el resto del formulario.
+        """
+        if not cambios:
+            raise HTTPException(status_code=400,
+                                detail="No hay cambios que guardar.")
+        return aplicar_ajustes(cambios)
+
+    @app.post("/api/ajustes/restablecer")
+    async def restablecer_ajustes() -> dict[str, Any]:
+        return restaurar_ajustes()
+
+    @app.post("/api/ajustes/probar-voz")
+    async def probar_la_voz(prueba: PruebaVoz) -> dict[str, Any]:
+        """Oye la voz con los valores del formulario, sin guardar nada."""
+        try:
+            return await probar_voz(
+                app.state.motor,
+                voz=prueba.voz or None,
+                tono=prueba.tono or None,
+                velocidad=prueba.velocidad or None,
+                idioma=prueba.idioma or None,
+            )
+        except MotorOcupado as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/dispositivos")
+    async def dispositivos() -> dict[str, Any]:
+        return await listar_dispositivos()
+
+    @app.get("/api/modelos")
+    async def modelos_llm() -> dict[str, Any]:
+        return await listar_modelos(app.state.http)
 
     return app

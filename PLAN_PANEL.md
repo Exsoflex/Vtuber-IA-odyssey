@@ -1,6 +1,8 @@
 # 🛰️ Panel de control de Niu — plan
 
-Estado: **propuesta**. Nada de esto está implementado todavía.
+Estado: **implementado** (fases 0 a 3.5: ajustes tipados, motor, panel,
+chat y editor de ajustes). Este documento conserva el diseño original; el
+estado real del código vive en `PROJECT_CONTEXT.md` y `ROADMAP.md`.
 Objetivo: operar a Niu desde una interfaz, cambiar sus ajustes sin editar `.env`
 y ver la conversación mientras ocurre.
 

@@ -241,7 +241,7 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 | Motor extraído | `core/motor.py`: `iniciar/detener/detener_voz`, estados y eventos; `main.py` como cliente | ✅ |
 | Panel mínimo | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar y estado | ✅ |
 | Vista de chat | Chat con streaming en vivo, métricas por turno, entrada de texto y sesión en `sesiones/*.json` | ✅ |
-| Ajustes en la UI | 10 esenciales, avanzados plegados, «restaurar» y «probar voz» | ⚠️ pendiente |
+| Ajustes en la UI | Esquema del servidor, guardado validado con avisos, avanzados plegados, «restaurar» y «probar voz» | ✅ |
 | Tema espacial | Blanco azulado, azules/violetas, vidrio suave y campo de estrellas | ✅ |
 
 ---

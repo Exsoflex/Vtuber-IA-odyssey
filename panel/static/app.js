@@ -1,4 +1,4 @@
-/* Panel de Niu — fase 3.
+/* Panel de Niu — fases 3 y 4.
  *
  * Dos canales y cada uno para lo suyo:
  *   - sondeo cada segundo para el estado del motor y los chips;
@@ -7,6 +7,10 @@
  *
  * La interfaz no sabe conversar: manda texto al motor y pinta los mensajes que
  * el servidor le empuja. Toda la lógica de la conversación está en el motor.
+ *
+ * Los ajustes son otra cosa: el formulario se pinta desde el esquema que manda
+ * el servidor (`GET /api/ajustes`), así que añadir un campo se hace en
+ * `panel/ajustes.py`, no aquí.
  */
 
 const ETIQUETAS = {
@@ -49,6 +53,7 @@ const nodosMensajes = new Map();
 
 let consultando = false;
 let motorConTexto = false;
+let estadoActual = "apagado";
 
 /* ─── Chat ────────────────────────────────────────────────────────────── */
 
@@ -264,6 +269,394 @@ function exportarConversacion() {
   enlace.remove();
 }
 
+/* ─── Ajustes ─────────────────────────────────────────────────────────── */
+
+const ajustes = {
+  grupos: document.getElementById("ajustes-grupos"),
+  avanzados: document.getElementById("ajustes-avanzados"),
+  cajaAvanzados: document.getElementById("ajustes-caja-avanzados"),
+  aviso: document.getElementById("ajustes-aviso"),
+  guardar: document.getElementById("btn-guardar"),
+  restaurar: document.getElementById("btn-restaurar"),
+  probar: document.getElementById("btn-probar"),
+};
+
+/** Campos tal como los describe el servidor (su orden manda al pintar). */
+let camposAjustes = [];
+/** Lo que hay guardado en disco: sirve para saber si el formulario cambió. */
+let valoresGuardados = {};
+/** Campos que el usuario tocó de verdad. */
+let camposModificados = new Set();
+
+const LISTAS = {
+  voces: "lista-voces",
+  entrada: "lista-entrada",
+  salida: "lista-salida",
+  llm: "lista-modelos",
+};
+
+function numeroDe(texto) {
+  const numero = Number.parseFloat(String(texto).replace(",", "."));
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+/** `5` → `+5`, `-5` → `-5`, `0` → `+0` (el formato que espera Edge-TTS). */
+function conSigno(numero) {
+  const redondeado = Math.round(numero);
+  return redondeado >= 0 ? `+${redondeado}` : String(redondeado);
+}
+
+/** Lo que vale el control, ya en el formato del ajuste (no del `<input>`). */
+function lecturaDe(campo, control) {
+  switch (campo.tipo) {
+    case "hz":
+      return `${conSigno(numeroDe(control.value))}Hz`;
+    case "porcentaje":
+      return `${conSigno(numeroDe(control.value))}%`;
+    case "numero":
+      return numeroDe(control.value);
+    default:
+      return control.value.trim();
+  }
+}
+
+/** Texto que acompaña al slider: `+5 Hz`, `-8 %`, `0.9 s`. */
+function textoDeControl(campo, valor) {
+  if (campo.tipo === "hz") return `${conSigno(numeroDe(valor))} Hz`;
+  if (campo.tipo === "porcentaje") return `${conSigno(numeroDe(valor))} %`;
+  const numero = numeroDe(valor);
+  return campo.unidad ? `${numero} ${campo.unidad}` : String(numero);
+}
+
+function crearControl(campo, valor) {
+  if (campo.tipo === "seleccion") {
+    const control = document.createElement("select");
+    control.className = "ajustes-control";
+    for (const opcion of campo.opciones || []) {
+      const item = document.createElement("option");
+      item.value = opcion.valor;
+      item.textContent = opcion.texto;
+      control.append(item);
+    }
+    control.value = valor;
+    return { control, nodo: control };
+  }
+
+  if (campo.tipo === "hz" || campo.tipo === "porcentaje") {
+    const fila = document.createElement("div");
+    fila.className = "ajustes-rango";
+    const control = document.createElement("input");
+    control.type = "range";
+    control.min = campo.minimo;
+    control.max = campo.maximo;
+    control.step = campo.paso;
+    control.value = numeroDe(valor);
+    const salida = document.createElement("output");
+    salida.textContent = textoDeControl(campo, valor);
+    control.addEventListener("input", () => {
+      salida.textContent = textoDeControl(campo, control.value);
+    });
+    fila.append(control, salida);
+    return { control, nodo: fila };
+  }
+
+  const control = document.createElement("input");
+  control.className = "ajustes-control";
+  if (campo.tipo === "numero") {
+    control.type = "number";
+    control.min = campo.minimo;
+    control.max = campo.maximo;
+    control.step = campo.paso;
+  } else {
+    control.type = "text";
+    control.autocomplete = "off";
+    control.spellcheck = false;
+    if (campo.fuente && LISTAS[campo.fuente]) control.setAttribute("list", LISTAS[campo.fuente]);
+  }
+  control.value = valor ?? "";
+  return { control, nodo: control };
+}
+
+function crearCampo(campo, valor) {
+  const caja = document.createElement("div");
+  caja.className = "ajustes-campo";
+
+  const id = `aj-${campo.campo}`;
+  const etiqueta = document.createElement("label");
+  etiqueta.htmlFor = id;
+
+  const nombre = document.createElement("span");
+  nombre.className = "ajustes-nombre";
+  nombre.textContent = campo.etiqueta;
+  if (!campo.en_caliente) {
+    const frio = document.createElement("span");
+    frio.className = "ajustes-frio";
+    frio.textContent = "reinicia";
+    frio.title = "Se aplica al reiniciar el motor.";
+    nombre.append(frio);
+  }
+  etiqueta.append(nombre);
+
+  if (campo.tipo === "numero" && campo.unidad) {
+    const unidad = document.createElement("span");
+    unidad.className = "ajustes-unidad";
+    // La unidad decora el campo; el nombre accesible es solo la etiqueta.
+    unidad.setAttribute("aria-hidden", "true");
+    unidad.textContent = campo.unidad;
+    etiqueta.append(unidad);
+  }
+
+  const { control, nodo } = crearControl(campo, valor);
+  control.id = id;
+  control.dataset.campo = campo.campo;
+  const marcar = () => {
+    camposModificados.add(campo.campo);
+    actualizarGuardar();
+  };
+  control.addEventListener("input", marcar);
+  control.addEventListener("change", marcar);
+
+  caja.append(etiqueta, nodo);
+
+  if (campo.nota) {
+    const nota = document.createElement("p");
+    nota.className = "ajustes-nota";
+    nota.textContent = campo.nota;
+    caja.append(nota);
+  }
+  return caja;
+}
+
+function crearGrupo(seccion, campos, titulos, destino) {
+  const bloque = document.createElement("section");
+  bloque.className = "ajustes-grupo";
+
+  const titulo = document.createElement("h3");
+  titulo.className = "ajustes-grupo-titulo";
+  titulo.textContent = titulos[seccion] || seccion;
+
+  const rejilla = document.createElement("div");
+  rejilla.className = "ajustes-campos";
+  for (const campo of campos) {
+    rejilla.append(crearCampo(campo, valoresGuardados[campo.campo]));
+  }
+
+  bloque.append(titulo, rejilla);
+  destino.append(bloque);
+}
+
+function renderAjustes(datos) {
+  camposAjustes = datos.campos || [];
+  valoresGuardados = datos.valores || {};
+  camposModificados = new Set();
+  const titulos = datos.secciones || {};
+
+  ajustes.grupos.replaceChildren();
+  ajustes.avanzados.replaceChildren();
+
+  const grupos = new Map();
+  for (const campo of camposAjustes) {
+    if (!grupos.has(campo.seccion)) grupos.set(campo.seccion, []);
+    grupos.get(campo.seccion).push(campo);
+  }
+  for (const [seccion, campos] of grupos) {
+    const destino = seccion === "avanzado" ? ajustes.avanzados : ajustes.grupos;
+    crearGrupo(seccion, campos, titulos, destino);
+  }
+  ajustes.cajaAvanzados.hidden = !grupos.has("avanzado");
+
+  // Sugerencias de voz: vienen en el esquema, no de una petición aparte.
+  const campoVoz = camposAjustes.find((campo) => campo.campo === "voz");
+  llenarLista("lista-voces", (campoVoz?.sugerencias || []).map((voz) => ({ valor: voz })));
+
+  ajustes.guardar.disabled = true;
+  ajustes.restaurar.disabled = false;
+}
+
+function lecturas() {
+  const valores = {};
+  for (const campo of camposAjustes) {
+    const control = document.getElementById(`aj-${campo.campo}`);
+    if (control) valores[campo.campo] = lecturaDe(campo, control);
+  }
+  return valores;
+}
+
+/**
+ * Solo lo que el usuario cambió de verdad.
+ *
+ * No se comparan valores con lo guardado a propósito: `tono` guardado como ""
+ * significa «el del perfil de idioma», pero el slider no puede estar vacío.
+ * Comparando, cualquier retoque de otro campo reenviaría `+0Hz` y congelaría el
+ * tono del perfil sin que nadie lo pidiera.
+ */
+function cambiosPendientes() {
+  const valores = lecturas();
+  const cambios = {};
+  for (const campo of camposModificados) {
+    if (campo in valores) cambios[campo] = valores[campo];
+  }
+  return cambios;
+}
+
+function actualizarGuardar() {
+  ajustes.guardar.disabled = Object.keys(cambiosPendientes()).length === 0;
+}
+
+function avisarAjustes(texto, tipo = "info") {
+  ajustes.aviso.hidden = !texto;
+  ajustes.aviso.textContent = texto || "";
+  ajustes.aviso.dataset.tipo = tipo;
+}
+
+async function traerAjustes() {
+  const respuesta = await fetch("/api/ajustes", { cache: "no-store" });
+  if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+  return respuesta.json();
+}
+
+async function cargarAjustes() {
+  try {
+    renderAjustes(await traerAjustes());
+  } catch (error) {
+    ajustes.grupos.replaceChildren();
+    const fallo = document.createElement("p");
+    fallo.className = "ajustes-nota";
+    fallo.textContent = `No se pudieron cargar los ajustes: ${error.message}`;
+    ajustes.grupos.append(fallo);
+  }
+}
+
+async function guardarAjustes() {
+  const cambios = cambiosPendientes();
+  if (!Object.keys(cambios).length) return;
+
+  ajustes.guardar.disabled = true;
+  ajustes.guardar.textContent = "Guardando…";
+  try {
+    const respuesta = await fetch("/api/ajustes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    });
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(datos.detail || `HTTP ${respuesta.status}`);
+
+    const lineas = [...(datos.avisos || [])];
+    if (datos.requiere_reinicio?.length) {
+      lineas.push(`Reinicia el motor para aplicar: ${datos.requiere_reinicio.join(", ")}.`);
+    }
+    await cargarAjustes();
+    avisarAjustes(lineas.length ? lineas.join("\n") : "Ajustes guardados.",
+                  lineas.length ? "info" : "ok");
+    consultar();
+  } catch (error) {
+    avisarAjustes(`No se pudieron guardar: ${error.message}`, "error");
+  } finally {
+    ajustes.guardar.textContent = "Guardar";
+    actualizarGuardar();
+  }
+}
+
+async function restaurarAjustes() {
+  const seguro = window.confirm(
+    "¿Volver a los valores de fábrica? Se sobrescribe config.json."
+  );
+  if (!seguro) return;
+
+  try {
+    const respuesta = await fetch("/api/ajustes/restablecer", { method: "POST" });
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(datos.detail || `HTTP ${respuesta.status}`);
+
+    const lineas = ["Ajustes de fábrica restaurados."];
+    if (datos.requiere_reinicio?.length) {
+      lineas.push(`Reinicia el motor para aplicar: ${datos.requiere_reinicio.join(", ")}.`);
+    }
+    await cargarAjustes();
+    avisarAjustes(lineas.join("\n"), "ok");
+    consultar();
+  } catch (error) {
+    avisarAjustes(`No se pudo restaurar: ${error.message}`, "error");
+  }
+}
+
+async function probarVoz() {
+  const valores = lecturas();
+  ajustes.probar.disabled = true;
+  ajustes.probar.textContent = "Probando…";
+  try {
+    const respuesta = await fetch("/api/ajustes/probar-voz", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        voz: valores.voz || "",
+        tono: valores.tono || "",
+        velocidad: valores.velocidad || "",
+        idioma: valores.idioma || "",
+      }),
+    });
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(datos.detail || `HTTP ${respuesta.status}`);
+    if (!datos.ok) throw new Error(datos.detalle || "No se pudo generar la voz.");
+
+    avisarAjustes(
+      `Prueba escuchada: ${datos.voz} · ${datos.tono} · ${datos.velocidad}`,
+      "ok"
+    );
+  } catch (error) {
+    avisarAjustes(`La prueba de voz falló: ${error.message}`, "error");
+  } finally {
+    ajustes.probar.textContent = "Probar voz";
+    ajustes.probar.disabled = ["pensando", "hablando"].includes(estadoActual);
+  }
+}
+
+/* Las sugerencias de dispositivos y modelos se piden aparte: son listas del
+ * sistema (y Ollama puede tardar), no parte de los ajustes guardados. */
+function llenarLista(id, elementos) {
+  const lista = document.getElementById(id);
+  if (!lista) return;
+  lista.replaceChildren();
+  const vistos = new Set();
+  for (const elemento of elementos || []) {
+    const valor = String(elemento.valor ?? "").trim();
+    // sounddevice repite el mismo micro una vez por host API (MME,
+    // DirectSound...). Para el ajuste basta el nombre.
+    if (!valor || vistos.has(valor)) continue;
+    vistos.add(valor);
+    const opcion = document.createElement("option");
+    opcion.value = valor;
+    if (elemento.etiqueta) opcion.label = elemento.etiqueta;
+    lista.append(opcion);
+  }
+}
+
+async function cargarListas() {
+  const pedir = async (ruta) => {
+    const respuesta = await fetch(ruta, { cache: "no-store" });
+    if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+    return respuesta.json();
+  };
+
+  const [dispositivos, modelos] = await Promise.allSettled([
+    pedir("/api/dispositivos"),
+    pedir("/api/modelos"),
+  ]);
+
+  if (dispositivos.status === "fulfilled") {
+    const datos = dispositivos.value;
+    llenarLista("lista-entrada", (datos.entrada || [])
+      .map((d) => ({ valor: d.nombre, etiqueta: d.host_api })));
+    llenarLista("lista-salida", (datos.salida || [])
+      .map((d) => ({ valor: d.nombre, etiqueta: d.host_api })));
+  }
+  if (modelos.status === "fulfilled") {
+    llenarLista("lista-modelos", (modelos.value.llm || [])
+      .map((modelo) => ({ valor: modelo })));
+  }
+}
+
 /* ─── Estado del motor ────────────────────────────────────────────────── */
 
 function mostrarAviso(texto) {
@@ -278,6 +671,7 @@ function mostrarAviso(texto) {
 
 function pintar(datos) {
   const estado = datos.estado || "apagado";
+  estadoActual = estado;
 
   orbita.dataset.estado = estado;
   pastilla.dataset.estado = estado;
@@ -298,6 +692,15 @@ function pintar(datos) {
   chat.entrada.placeholder = motorConTexto
     ? "Escribe a Niu…"
     : "Inicia el motor para escribir";
+
+  // La prueba de voz pelearía con la voz de Niu por el mismo stream de audio.
+  if (["pensando", "hablando"].includes(estado)) {
+    ajustes.probar.disabled = true;
+    ajustes.probar.title = "Niu está hablando: espera a que termine.";
+  } else {
+    ajustes.probar.disabled = false;
+    ajustes.probar.title = "Oír la voz con los valores del formulario, sin guardar";
+  }
 
   const chips = datos.chips || {};
   for (const [clave, valor] of Object.entries(chips)) {
@@ -360,7 +763,13 @@ botones.copiar.addEventListener("click", copiarConversacion);
 botones.exportar.addEventListener("click", exportarConversacion);
 botones.limpiar.addEventListener("click", limpiarConversacion);
 
+ajustes.guardar.addEventListener("click", guardarAjustes);
+ajustes.restaurar.addEventListener("click", restaurarAjustes);
+ajustes.probar.addEventListener("click", probarVoz);
+
 actualizarVacio();
 conectar();
 consultar();
+cargarAjustes();
+cargarListas();
 setInterval(consultar, 1000);
