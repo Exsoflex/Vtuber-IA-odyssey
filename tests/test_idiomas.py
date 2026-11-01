@@ -17,8 +17,20 @@ Ejecutar:
 
 import pytest
 
+from core import perfiles
 from core.brain import SISTEMA_INSTRUCCION_NIU, NiuBrain
 from core.idiomas import ESPANOL, IDIOMAS, INGLES, elegir_idioma
+
+
+@pytest.fixture(autouse=True)
+def personalidad_de_fabrica(monkeypatch):
+    """Estos tests comprueban el idioma, no la instrucción guardada.
+
+    Sin esto, editar la personalidad desde el panel haría que la suite
+    dependiera del `perfiles.json` de la máquina.
+    """
+    monkeypatch.setattr(perfiles, "instruccion_activa",
+                        lambda: SISTEMA_INSTRUCCION_NIU)
 
 
 class ProveedorFalso:
@@ -119,3 +131,24 @@ async def test_el_streaming_tambien_lleva_las_reglas():
         pass
 
     assert INGLES.reglas.strip() in proveedor.instrucciones[0]
+
+
+async def test_editar_la_instruccion_surte_efecto_en_el_turno_siguiente(monkeypatch):
+    """El motor se crea una vez; la personalidad se lee en cada turno.
+
+    Si la instrucción se capturara al construir `NiuBrain`, editarla en el
+    panel no haría nada hasta reiniciar, y eso se ve como un fallo silencioso.
+    """
+    actual = {"texto": "Personalidad A"}
+    monkeypatch.setattr(perfiles, "instruccion_activa", lambda: actual["texto"])
+
+    proveedor = ProveedorFalso()
+    cerebro = NiuBrain(provider=proveedor, idioma=ESPANOL)
+
+    await cerebro.procesar_mensaje("Rotceh", "hola")
+    actual["texto"] = "Personalidad B"
+    await cerebro.procesar_mensaje("Rotceh", "otra vez")
+
+    primera, segunda = proveedor.instrucciones
+    assert primera.startswith("Personalidad A")
+    assert segunda.startswith("Personalidad B")

@@ -93,14 +93,14 @@ ESPANOL = Idioma(
 ## IDIOMA (REGLA DE ORO)
 * Responde SIEMPRE en español natural, aunque Rotceh te hable en otro idioma.
 * Muletillas: "bueno...", "o sea...", "este...", "es que...".
-* Mantén los emojis con la misma frecuencia que en tus respuestas normales.
+* Emojis: uno como mucho, y solo si de verdad aporta.
 * Límites: lenguaje limpio, sin groserías.
 """,
     # Este texto no se transcribe: es una pista. Whisper elige las palabras por
     # contexto y, sin él, "Niu" (nombre que no existe en español) se convierte
     # en "New", "ni" o "un".
     prompt_stt=(
-        "Conversación hablada en español con Niu, una asistente virtual. "
+        "Conversación hablada en español con Niu, una chica VTuber. "
         "El usuario se dirige a ella por su nombre: Niu. "
         "Frases habituales: hola Niu, ¿cómo estás?, ¿qué hora es?, "
         "¿qué día es hoy?, ¿me escuchas?, pon música, abre el navegador."
@@ -131,14 +131,14 @@ INGLES = Idioma(
   whole sentence as an English speaker would say it.
 * If you don't know a word, stay in English: say "I don't know the word, but..."
   instead of switching languages.
-* Keep using emojis (✨, 🚀, 💻, 💖, 💫, ‼️, 💕) as often as you normally do.
+* Emojis: at most one, and only if it adds something.
 * Limits: clean language, no profanity.
 """,
     # En inglés el prompt es lo que más pesa: sin él, el decoder parte del
     # idioma que más ha visto (español) y transcribe sonidos ingleses con
     # ortografía española. Con él, espera inglés y además reconoce «Niu».
     prompt_stt=(
-        "Spoken conversation in English with Niu, a virtual assistant. "
+        "Spoken conversation in English with Niu, a VTuber girl. "
         "The user calls her by name: Niu. "
         "Common phrases: hi Niu, how are you?, what time is it?, "
         "what day is it today?, can you hear me?, play music, open the browser."

@@ -3,6 +3,9 @@
 # archivo puede acabar conteniendo nombres de dispositivos de audio.
 config.json
 config.json.tmp
+# Perfiles de Niu: ajustes + instrucción de cada uno, datos del usuario.
+perfiles.json
+perfiles.json.tmp
 # Conversaciones guardadas por el panel: son datos del usuario, no del repo.
 sesiones/
 .venv/

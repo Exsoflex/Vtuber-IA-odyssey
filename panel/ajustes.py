@@ -35,7 +35,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from core import config, tts
+from core import config, perfiles, tts
 from core.idiomas import elegir_idioma, tono_activo, voz_activa
 
 try:                        # igual que en tts.py: sin PortAudio no hay listas
@@ -75,9 +75,9 @@ MODELOS_WHISPER = [
 ]
 
 # Campos que el motor captura al arrancar (cerebro, oído y micrófono) y que no
-# se pueden cambiar mientras conversa. Todo lo demás se lee al usarlo.
-REQUIEREN_REINICIO = ("idioma", "microfono", "modelo_llm", "motor_stt",
-                      "modelo_whisper")
+# se pueden cambiar mientras conversa. Todo lo demás se lee al usarlo. La lista
+# vive en `core/config.py` porque también la usa el cambio de perfil.
+REQUIEREN_REINICIO = config.CAMPOS_FRIOS
 
 
 class MotorOcupado(Exception):
@@ -218,6 +218,9 @@ def aplicar_ajustes(cambios: dict[str, Any]) -> dict[str, Any]:
     nuevos, avisos = config.normalizar(datos)
     config.guardar_ajustes(nuevos)
     config.fijar_ajustes(nuevos)
+    # El perfil activo guarda su propia copia: si se cambiara de perfil y se
+    # volviera, estos valores tienen que seguir aquí.
+    perfiles.sincronizar_ajustes(nuevos)
     return _respuesta(antes, nuevos, avisos)
 
 
@@ -225,6 +228,7 @@ def restaurar_ajustes() -> dict[str, Any]:
     """Vuelve a los valores de fábrica, en memoria y en disco."""
     antes = config.ajustes()
     nuevos = config.restablecer()
+    perfiles.sincronizar_ajustes(nuevos)
     return _respuesta(antes, nuevos, [])
 
 

@@ -71,6 +71,11 @@ _RE_IDIOMA = re.compile(r"^[a-z]{2}(-[a-z]{2})?$")
 
 MOTORES_STT = ("whisper", "gemini")
 
+# Campos que el motor captura al arrancar (cerebro, oído y micrófono). Cambian
+# de un perfil a otro, pero no en caliente: quien los edite tiene que reiniciar.
+CAMPOS_FRIOS = ("idioma", "microfono", "modelo_llm", "motor_stt",
+                "modelo_whisper")
+
 
 @dataclass(frozen=True)
 class Ajustes:

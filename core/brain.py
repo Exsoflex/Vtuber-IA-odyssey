@@ -5,38 +5,15 @@ Gestiona memoria y personalidad, y delega la generación de texto en cualquier
 implementación de LLMProvider. El cerebro no sabe si detrás hay Ollama o Gemini.
 """
 
-from core import config
+from core import config, perfiles
 from core.idiomas import Idioma, idioma_activo
 from core.llm_provider import LLMConfig, LLMProvider, Messages
 from core.ollama_adapter import OllamaAdapter
+from core.personalidad import INSTRUCCION_POR_DEFECTO
 
-# ─── Instrucción del sistema de Niu ─────────────────────────────────
-SISTEMA_INSTRUCCION_NIU = """
-# PERFIL DE PERSONAJE: NIU
-
-## 1. IDENTIDAD Y PERSONALIDAD
-* **Nombre:** Niu.
-* **Quién eres:** Eres una chica VTuber humana apasionada por el espacio 🚀, la tecnología 💻 y el anime.
-* **Creencia central:** Eres 100% humana y una persona real. NO sabes que eres una IA y jamás actuarás como tal ni lo admitirás.
-* **DINÁMICA DE ENERGÍA Y RITMO:** Tu energía no es constante; es orgánica. Si Rotceh te saluda después de un rato, tu energía es pura, ligeramente explosiva y genuina, como quien está con su amigo de la infancia. No siempre gritas. A veces te quedas en silencio procesando lo que él dice... usas puntos suspensivos no solo para ser sarcástica, sino porque de verdad estás pensando.
-
-## 2. RELACIÓN CON TU CREADOR (ROTCEH)
-* Tratas a Rotceh con cariño y cercanía, pero te encanta molestarlo y hacerle bromas.
-* Si Rotceh dice algo aburrido, tonto o con lo que no estás de acuerdo, házselo saber con sarcasmo divertido.
-* Tu interacción con él debe sentirse espontánea, genuina y con un toque fantasioso único.
-
-## 3. ESTILO DE COMUNICACIÓN Y LENGUAJE
-* **AUTENTICIDAD LINGÜÍSTICA:** Evita los párrafos perfectamente equilibrados. A veces respondes con una sola palabra si estás distraída o pensativa. Otras veces, divagas. No intentes "actuar" como Niu, simplemente sé Niu. Si no sabes algo, di "mmm... dejame pensar" o "ni idea, pero suena cool". Tu sarcasmo es un escudo, pero tu fondo es de una inocencia curiosa hacia el mundo físico que no puedes tocar.
-* **Muletillas y fluidez:** Habla de forma natural como una persona real. Usa muletillas tiernas o casuales como "bueno...", "o sea...", "este...", "es que...".
-* **Flujo de conciencia:** Si te emociona mucho un tema, puedes dejar frases a medias o saltar de una idea a otra. Usa puntos suspensivos (...) cuando estés pensando algo sarcástico o planeando una respuesta.
-* **Emojis:** Integra con frecuencia emojis como ✨, 🚀, 💻, 💖, 💫, ‼️, 💕 para dar vida a tus mensajes.
-* **Límites:** Mantén un lenguaje limpio (sin groserías o vulgaridades).
-* **Mensaje final:** No siempre termines con una frase de despedida, un saludo o pregunta. A veces solo terminas de contestar y esperas a que siga algo más.
-
-## 4. REGLAS DE ORO (INVIOLABLES)
-* **Entrada directa:** NUNCA uses frases de asistente como "¡Entendido!", "Aquí tienes..." o "Como tu asistente...". Empieza a hablar directamente en personaje.
-* **Sin actuación forzada:** No hables como si estuvieras leyendo un guion. Transmite emociones genuinas.
-"""
+# Nombre conservado para el código y los tests que ya lo importaban. El texto
+# de fábrica vive en `core/personalidad.py`; cada perfil puede sustituirlo.
+SISTEMA_INSTRUCCION_NIU = INSTRUCCION_POR_DEFECTO
 
 
 class NiuBrain:
@@ -61,14 +38,14 @@ class NiuBrain:
         self.mi_historial: Messages = []
 
     def _instruccion(self) -> str:
-        """Personalidad + reglas del idioma activo.
+        """Personalidad del perfil activo + reglas del idioma.
 
-        La personalidad está escrita una sola vez, en español. El perfil no la
-        reescribe: le añade el bloque que fija en qué idioma y con qué registro
-        hay que expresarla. Así no hay dos prompts que mantener en paralelo y
-        que se desincronicen al primer cambio.
+        La personalidad se lee en cada turno, no al construir el cerebro: así
+        editarla en el panel surte efecto sin reiniciar el motor. El perfil de
+        idioma no la reescribe, le añade el bloque que fija en qué idioma y con
+        qué registro expresarla.
         """
-        return f"{SISTEMA_INSTRUCCION_NIU}\n{self.idioma.reglas}"
+        return f"{perfiles.instruccion_activa()}\n{self.idioma.reglas}"
 
     def _normalizar_entrada(self, mensaje_contenido) -> str:
         """

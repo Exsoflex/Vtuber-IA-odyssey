@@ -29,6 +29,8 @@ Vtuber IA odyssey/
 │   ├── config.py          # Ajustes tipados: validación, config.json y valores por defecto
 │   ├── motor.py           # Bucle de conversación: estados, eventos, iniciar/detener/detener_voz
 │   ├── brain.py           # Memoria + personalidad + llamada a LLMProvider
+│   ├── personalidad.py    # Instrucción de fábrica de Niu (cada perfil puede cambiarla)
+│   ├── perfiles.py        # Perfiles: ajustes + instrucción, con escritura atómica
 │   ├── llm_provider.py    # Interfaz común (Protocol) + LLMConfig/LLMResponse
 │   ├── ollama_adapter.py  # Implementación local vía /api/chat
 │   ├── stt.py             # Micrófono (sounddevice) + detección de silencio (VAD)
@@ -43,9 +45,10 @@ Vtuber IA odyssey/
 │   └── vts_client.py      # VTube Studio: WebSocket + auth + parámetros
 ├── main.py                # Cliente de consola: suscribe a los eventos del motor y los imprime
 ├── panel/                 # Panel de control local (FastAPI en 127.0.0.1)
-│   ├── app.py             # API: motor, chips, chat, ajustes y WebSocket `/ws`
+│   ├── app.py             # API: motor, chips, chat, ajustes, perfiles y WebSocket `/ws`
 │   ├── chat.py            # Historial: eventos del motor → mensajes → sesiones/*.json
 │   ├── ajustes.py         # Esquema del formulario, guardado validado y «probar voz»
+│   ├── perfiles.py        # Activar/crear/borrar perfiles y aplicarlos a config.json
 │   ├── __main__.py        # `python -m panel` → uvicorn en 127.0.0.1:8000
 │   └── static/            # Interfaz: HTML + CSS del tema espacial + JS de sondeo, chat y ajustes
 ├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
@@ -54,6 +57,7 @@ Vtuber IA odyssey/
 ├── requirements.txt
 ├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
 ├── config.json            # Ajustes editables desde el panel (no versionado)
+├── perfiles.json          # Perfiles: ajustes + instrucción de cada uno (no versionado)
 ├── sesiones/              # Chat guardado por el panel: un JSON por arranque (no versionado)
 ├── vts_token.txt          # Token VTS persistente (no versionado)
 ├── test_audio.py          # Script auxiliar para listar salidas de audio
@@ -119,7 +123,9 @@ respuesta completa.
 - ✅ **Oído en el idioma del perfil**: `idioma_stt()` devuelve el código del perfil salvo que `NIU_STT_IDIOMA` diga otra cosa. Antes estaba en automático con un prompt en español, y Whisper transcribía el inglés en español.
 - ✅ **Sin pausas entre partes**: Edge-TTS mete ~0,85 s de silencio al final de cada frase; se recorta dejando 0,05 s al principio y 0,15 s al final. Las frases de menos de 40 caracteres se acumulan con la siguiente (la primera, no: ahí manda la velocidad).
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
-- ✅ 184 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, cancelación de la grabación (`test_stt_cancelar.py`), ajustes (`test_config.py`), motor (`test_motor.py`, incluida la entrada de texto), historial del chat (`test_chat.py`), formulario de ajustes (`test_ajustes_panel.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
+- ✅ **Perfiles de configuración** (`core/perfiles.py` + `panel/perfiles.py`): cada perfil guarda una copia completa de los ajustes y su propia instrucción de sistema. Se puede crear (de fábrica o duplicando el activo), renombrar, activar y eliminar; el perfil activo se aplica sobre `config.json` al arrancar y al activarlo, y guardar ajustes en el panel los copia también al perfil. El cambio de perfil avisa si hay campos fríos pendientes de reinicio. Se guarda en `perfiles.json` con escritura atómica (no hay base de datos: son pocos perfiles de un solo usuario).
+- ✅ **Personalidad editable** (`core/personalidad.py`): la instrucción de fábrica vive fuera del cerebro y cada perfil puede sustituirla desde el panel. `NiuBrain` la lee en **cada turno**, así que editarla se aplica en la respuesta siguiente sin reiniciar el motor. El texto es deliberadamente hablado: frases cortas, muletillas variadas, dudas y cambios de opinión triviales, sin tono de asistente ni referencias constantes al espacio.
+- ✅ 207 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, cancelación de la grabación (`test_stt_cancelar.py`), ajustes (`test_config.py`), motor (`test_motor.py`, incluida la entrada de texto), historial del chat (`test_chat.py`), formulario de ajustes (`test_ajustes_panel.py`), perfiles (`test_perfiles.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
 - ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
@@ -187,6 +193,10 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 | Hecho | `preparar()` en el proveedor LLM | El primer turno pagaba 9,5 s de carga en frío; ahora se paga al arrancar |
 | Hecho | `keep_alive` de 30 min en Ollama | Con los 5 min por defecto, una pausa descargaba el modelo y volvía el coste |
 | Hecho | `silencio_final` 1,0 → 0,6 s | Era tiempo muerto puro antes de empezar a transcribir |
+| Hecho | Perfiles en `perfiles.json`, sin base de datos | Son pocos perfiles de un solo usuario y la escritura atómica ya existe en `core/config.py`; una SQLite añadiría esquema y migraciones sin aportar nada aquí |
+| Hecho | El perfil activo manda sobre `config.json` | Una sola fuente de verdad para el panel; `config.json` queda como copia viva que leen la CLI y los módulos que no conocen perfiles |
+| Hecho | Instrucción del sistema leída en cada turno | Editarla debe aplicarse sin reiniciar el motor, como el resto de ajustes calientes |
+| Hecho | `<dialog>` propio en vez de `prompt()`/`confirm()` | El navegador integrado de la aplicación no soporta los diálogos nativos: el CRUD de perfiles fallaba sin avisar |
 | Pendiente | `GeminiAdapter` | Poder alternar entre local y nube |
 
 ---
@@ -589,6 +599,9 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Política y mecanismo separados**: `extraer_frases` corta (mecanismo); cuándo *conviene* cortar (mínimo de caracteres, primera frase exenta) es política y la aplican los generadores. Así el mecanismo se puede probar con y sin política.
 - **Los tests de propiedad encuentran bugs tontos y reales**: comprobar que el texto reconstruido es igual al original descubrió que al acumular frases cortas se comía un espacio y las palabras se pegaban («¡Hola!Sí»). Ningún test de «contiene esta frase» lo habría visto.
 - **Un flag no basta si el contexto dice otra cosa**: poner `language="en"` en Whisper y dejar un `initial_prompt` en español seguía transcribiendo en español. El prompt del decoder es contexto que se usa para elegir palabras, no documentación decorativa. La solución no fue añadir otra variable, sino hacer que el prompt salga del **mismo dato** que el idioma.
+- **Elegir el almacenamiento por el problema, no por costumbre**: para unos pocos perfiles de un solo usuario, un JSON con escritura atómica cubre lo mismo que una base de datos sin esquema ni migraciones; y se puede abrir con un editor cuando algo sale mal.
+- **Una copia viva necesita un dueño claro**: `config.json` y `perfiles.json` guardan lo mismo por motivos distintos. El perfil activo manda y `config.json` es la copia que leen los demás; sin esa jerarquía, dos archivos acaban discrepando y nadie sabe cuál es el bueno.
+- **Cuando la plataforma no tiene una función, el fallo es silencioso**: `prompt()` no existe en el navegador integrado y el botón «Nuevo» dejaba de hacer nada. Probar el flujo real en el navegador que se usa —no solo en uno de escritorio— es parte de la verificación.
 
 ### Aún no asumir dominio completo de
 

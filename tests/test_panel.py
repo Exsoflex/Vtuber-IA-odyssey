@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 import panel.app as panel_app
 import panel.chat as panel_chat
-from core import config
+from core import config, perfiles
 
 
 class MotorFalso:
@@ -74,12 +74,19 @@ def _panel(monkeypatch, motor, carpeta):
     monkeypatch.setattr(panel_app, "_microfono_disponible", lambda nombre: True)
     monkeypatch.setattr(panel_app.vts_client, "connected", True)
     monkeypatch.setattr(panel_chat, "CARPETA_POR_DEFECTO", carpeta)
+    monkeypatch.setattr(config, "RUTA_CONFIG", carpeta / "config.json")
+    monkeypatch.setattr(perfiles, "RUTA_PERFILES", carpeta / "perfiles.json")
 
-    app = panel_app.crear_app()
-    with TestClient(app) as c:
-        # Después de entrar: el lifespan acaba de crear el motor real.
-        app.state.motor = motor
-        yield c, motor
+    original = config.ajustes()
+    config.fijar_ajustes(config.por_defecto())
+    try:
+        app = panel_app.crear_app()
+        with TestClient(app) as c:
+            # Después de entrar: el lifespan acaba de crear el motor real.
+            app.state.motor = motor
+            yield c, motor
+    finally:
+        config.fijar_ajustes(original)
 
 
 @pytest.fixture
@@ -371,3 +378,107 @@ def _devolver(datos):
         return datos
 
     return falso
+
+
+# ─── Perfiles ───────────────────────────────────────────────────────────
+
+
+def test_la_interfaz_puede_listar_los_perfiles(cliente):
+    c, _ = cliente
+
+    datos = c.get("/api/perfiles").json()
+
+    assert datos["activo"] == "niu"
+    assert datos["nombre"] == "Niu"
+    assert datos["instruccion"]
+    assert datos["defecto_instruccion"]
+    assert [perfil["id"] for perfil in datos["perfiles"]] == ["niu"]
+
+
+def test_crear_un_perfil_lo_deja_activo(cliente):
+    c, _ = cliente
+
+    datos = c.post("/api/perfiles", json={"nombre": "Niu Espacial"}).json()
+
+    assert datos["activo"] == "niu-espacial"
+    assert datos["nombre"] == "Niu Espacial"
+    assert datos["valores"]["idioma"] == "es"
+
+
+def test_cada_perfil_guarda_sus_propios_ajustes(cliente):
+    c, _ = cliente
+
+    # El perfil nuevo empieza con los valores de fábrica y se queda activo.
+    c.post("/api/perfiles", json={"nombre": "Inglés"})
+    c.put("/api/ajustes", json={"idioma": "en", "voz": "en-US-AriaNeural"})
+
+    # Al volver al perfil original, sus ajustes siguen en español.
+    datos = c.post("/api/perfiles/niu/activar").json()
+    assert datos["valores"]["idioma"] == "es"
+
+    # Y al volver al inglés, recupera lo que se guardó allí.
+    datos = c.post("/api/perfiles/ingles/activar").json()
+    assert datos["valores"]["idioma"] == "en"
+    assert datos["valores"]["voz"] == "en-US-AriaNeural"
+    assert "idioma" in datos["requiere_reinicio"]
+
+
+def test_la_instruccion_se_guarda_por_perfil(cliente):
+    c, _ = cliente
+
+    datos = c.put(
+        "/api/perfiles/niu/instruccion",
+        json={"instruccion": "Habla como una persona real, sin asistente."},
+    ).json()
+
+    assert datos["instruccion"] == "Habla como una persona real, sin asistente."
+    assert c.get("/api/perfiles").json()["instruccion"] == (
+        "Habla como una persona real, sin asistente."
+    )
+
+
+def test_duplicar_copia_la_instruccion_del_activo(cliente):
+    c, _ = cliente
+    texto = "Una instrucción distinta."
+    c.put("/api/perfiles/niu/instruccion", json={"instruccion": texto})
+
+    datos = c.post("/api/perfiles",
+                   json={"nombre": "Copia", "duplicar": True}).json()
+
+    assert datos["activo"] == "copia"
+    assert datos["instruccion"] == texto
+
+
+def test_no_se_puede_borrar_el_ultimo_perfil(cliente):
+    c, _ = cliente
+
+    respuesta = c.delete("/api/perfiles/niu")
+
+    assert respuesta.status_code == 400
+    assert "último" in respuesta.json()["detail"]
+
+
+def test_una_instruccion_vacia_se_rechaza_con_aviso(cliente):
+    c, _ = cliente
+
+    respuesta = c.put("/api/perfiles/niu/instruccion", json={"instruccion": "   "})
+
+    assert respuesta.status_code == 400
+    assert "vacía" in respuesta.json()["detail"]
+    # Y no se ha perdido la que había.
+    assert c.get("/api/perfiles").json()["instruccion"].strip()
+
+
+def test_un_perfil_sin_nombre_se_rechaza(cliente):
+    c, _ = cliente
+
+    respuesta = c.post("/api/perfiles", json={"nombre": "   "})
+
+    assert respuesta.status_code == 400
+    assert "nombre" in respuesta.json()["detail"].lower()
+
+
+def test_activar_un_perfil_que_no_existe_da_404(cliente):
+    c, _ = cliente
+
+    assert c.post("/api/perfiles/no-existe/activar").status_code == 404

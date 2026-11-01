@@ -272,9 +272,11 @@ async function copiarConversacion() {
 }
 
 async function limpiarConversacion() {
-  const seguro = window.confirm(
-    "¿Empezar una sesión nueva? La conversación actual queda guardada en sesiones/."
-  );
+  const seguro = await preguntar({
+    titulo: "Nueva sesión",
+    texto: "¿Empezar una sesión nueva? La conversación actual queda guardada en sesiones/.",
+    aceptar: "Empezar",
+  });
   if (!seguro) return;
 
   try {
@@ -326,6 +328,362 @@ const LISTAS = {
   salida: "lista-salida",
   llm: "lista-modelos",
 };
+
+/* ─── Perfiles ────────────────────────────────────────────────────────── */
+
+const perfilesUI = {
+  select: document.getElementById("perfil-select"),
+  activar: document.getElementById("btn-perfil-activar"),
+  nuevo: document.getElementById("btn-perfil-nuevo"),
+  duplicar: document.getElementById("btn-perfil-duplicar"),
+  renombrar: document.getElementById("btn-perfil-renombrar"),
+  eliminar: document.getElementById("btn-perfil-eliminar"),
+  instruccion: document.getElementById("perfil-instruccion"),
+  notaInstruccion: document.getElementById("perfil-instruccion-nota"),
+  guardar: document.getElementById("btn-instruccion-guardar"),
+  fabrica: document.getElementById("btn-instruccion-fabrica"),
+  aviso: document.getElementById("perfil-aviso"),
+};
+
+let perfilActivo = "";
+let instruccionGuardada = "";
+let instruccionFabrica = "";
+let instruccionModificada = false;
+let cargandoPerfiles = false;
+
+/* ─── Diálogo propio ──────────────────────────────────────────────────── */
+
+const dialogoUI = {
+  raiz: document.getElementById("dialogo"),
+  formulario: document.getElementById("dialogo-form"),
+  titulo: document.getElementById("dialogo-titulo"),
+  texto: document.getElementById("dialogo-texto"),
+  etiqueta: document.getElementById("dialogo-etiqueta"),
+  campo: document.getElementById("dialogo-campo"),
+  cancelar: document.getElementById("dialogo-cancelar"),
+  aceptar: document.getElementById("dialogo-aceptar"),
+};
+
+/**
+ * Pregunta algo y devuelve la respuesta.
+ *
+ * Con `valor` (aunque sea "") muestra un campo y devuelve el texto recortado;
+ * sin `valor` es una confirmación y devuelve `true`. En ambos casos, cancelar
+ * devuelve `null`. Se usa en lugar de `prompt()`/`confirm()` porque el
+ * navegador integrado de la aplicación no los soporta.
+ */
+function preguntar({
+  titulo,
+  texto = "",
+  valor = null,
+  aceptar = "Aceptar",
+  peligro = false,
+}) {
+  const conCampo = valor !== null;
+
+  return new Promise((resolver) => {
+    let cerrado = false;
+
+    const terminar = (resultado) => {
+      if (cerrado) return;
+      cerrado = true;
+      dialogoUI.formulario.removeEventListener("submit", alEnviar);
+      dialogoUI.cancelar.removeEventListener("click", alCancelar);
+      dialogoUI.raiz.removeEventListener("cancel", alEscape);
+      if (dialogoUI.raiz.open) dialogoUI.raiz.close();
+      resolver(resultado);
+    };
+
+    const alEnviar = (evento) => {
+      evento.preventDefault();
+      if (!conCampo) {
+        terminar(true);
+        return;
+      }
+      const limpio = dialogoUI.campo.value.trim();
+      if (!limpio) {
+        dialogoUI.campo.focus();
+        return;
+      }
+      terminar(limpio);
+    };
+
+    const alCancelar = () => terminar(null);
+    const alEscape = (evento) => {
+      evento.preventDefault();
+      terminar(null);
+    };
+
+    dialogoUI.titulo.textContent = titulo;
+    dialogoUI.texto.textContent = texto;
+    dialogoUI.texto.hidden = !texto;
+    dialogoUI.etiqueta.hidden = !conCampo;
+    dialogoUI.campo.hidden = !conCampo;
+    dialogoUI.campo.value = conCampo ? valor : "";
+    dialogoUI.campo.required = conCampo;
+    dialogoUI.aceptar.textContent = aceptar;
+    dialogoUI.aceptar.classList.toggle("peligro-mini", peligro);
+    dialogoUI.aceptar.classList.toggle("primario-mini", !peligro);
+
+    dialogoUI.formulario.addEventListener("submit", alEnviar);
+    dialogoUI.cancelar.addEventListener("click", alCancelar);
+    dialogoUI.raiz.addEventListener("cancel", alEscape);
+
+    dialogoUI.raiz.showModal();
+    if (conCampo) {
+      dialogoUI.campo.focus();
+      dialogoUI.campo.select();
+    } else {
+      dialogoUI.cancelar.focus();
+    }
+  });
+}
+
+function avisarPerfil(texto, tipo = "info") {
+  perfilesUI.aviso.hidden = !texto;
+  perfilesUI.aviso.textContent = texto || "";
+  perfilesUI.aviso.dataset.tipo = tipo;
+}
+
+/* Lo que se perdería al cambiar de perfil o cerrar la pestaña. */
+function hayCambiosSinGuardar() {
+  return camposModificados.size > 0
+    || instruccionModificada
+    || Boolean(chat.entrada.value.trim());
+}
+
+async function confirmarSalida() {
+  if (!hayCambiosSinGuardar()) return true;
+  const seguro = await preguntar({
+    titulo: "Cambios sin guardar",
+    texto: "Hay cambios sin guardar. ¿Descartarlos y continuar?",
+    aceptar: "Descartar",
+    peligro: true,
+  });
+  return Boolean(seguro);
+}
+
+function actualizarBotonActivar() {
+  const seleccionado = perfilesUI.select.value;
+  const esActivo = Boolean(seleccionado) && seleccionado === perfilActivo;
+  perfilesUI.activar.disabled = !seleccionado || esActivo;
+
+  // El editor siempre edita el perfil activo. Si el desplegable apunta a otro,
+  // se bloquea: guardar el texto en el perfil equivocado sería silencioso y
+  // difícil de detectar.
+  perfilesUI.instruccion.disabled = !esActivo;
+  perfilesUI.fabrica.disabled = !esActivo;
+  perfilesUI.notaInstruccion.hidden = esActivo;
+  if (esActivo) {
+    actualizarInstruccion();
+  } else {
+    perfilesUI.guardar.disabled = true;
+  }
+}
+
+function actualizarInstruccion() {
+  instruccionModificada = perfilesUI.instruccion.value !== instruccionGuardada;
+  perfilesUI.guardar.disabled = !instruccionModificada;
+}
+
+function renderPerfiles(datos) {
+  perfilActivo = datos.activo || "";
+  instruccionGuardada = datos.instruccion || "";
+  instruccionFabrica = datos.defecto_instruccion || "";
+
+  perfilesUI.select.replaceChildren();
+  for (const perfil of datos.perfiles || []) {
+    const opcion = document.createElement("option");
+    opcion.value = perfil.id;
+    opcion.textContent = perfil.nombre;
+    perfilesUI.select.append(opcion);
+  }
+  perfilesUI.select.value = perfilActivo;
+  perfilesUI.eliminar.disabled = (datos.perfiles || []).length <= 1;
+
+  perfilesUI.instruccion.value = instruccionGuardada;
+  actualizarInstruccion();
+  actualizarBotonActivar();
+
+  const lineas = [...(datos.avisos || [])];
+  if (datos.requiere_reinicio?.length) {
+    lineas.push(`Reinicia el motor para aplicar: ${datos.requiere_reinicio.join(", ")}.`);
+  }
+  avisarPerfil(lineas.join("\n"), lineas.length ? "info" : "");
+}
+
+async function pedirPerfiles(ruta, opciones = {}) {
+  const respuesta = await fetch(ruta, {
+    cache: "no-store",
+    ...opciones,
+    headers: { "Content-Type": "application/json", ...(opciones.headers || {}) },
+  });
+  const datos = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(datos.detail || `HTTP ${respuesta.status}`);
+  return datos;
+}
+
+async function cargarPerfiles() {
+  if (cargandoPerfiles) return;
+  cargandoPerfiles = true;
+  try {
+    renderPerfiles(await pedirPerfiles("/api/perfiles"));
+  } catch (error) {
+    avisarPerfil(`No se pudieron cargar los perfiles: ${error.message}`, "error");
+  } finally {
+    cargandoPerfiles = false;
+  }
+}
+
+async function aplicarRespuestaPerfil(datos) {
+  renderPerfiles(datos);
+  // El cambio de perfil puede traer otros ajustes: el formulario se repinta
+  // desde el servidor en vez de intentar parchear cada campo a mano.
+  await cargarAjustes();
+  consultar();
+}
+
+async function activarPerfilSeleccionado() {
+  const id = perfilesUI.select.value;
+  if (!id || id === perfilActivo) {
+    actualizarBotonActivar();
+    return;
+  }
+  if (!(await confirmarSalida())) {
+    perfilesUI.select.value = perfilActivo;
+    actualizarBotonActivar();
+    return;
+  }
+
+  try {
+    const datos = await pedirPerfiles(
+      `/api/perfiles/${encodeURIComponent(id)}/activar`,
+      { method: "POST" }
+    );
+    await aplicarRespuestaPerfil(datos);
+  } catch (error) {
+    avisarPerfil(`No se pudo activar el perfil: ${error.message}`, "error");
+    perfilesUI.select.value = perfilActivo;
+    actualizarBotonActivar();
+  }
+}
+
+async function crearPerfil(duplicar) {
+  if (!(await confirmarSalida())) return;
+
+  const nombre = await preguntar({
+    titulo: duplicar ? "Duplicar perfil" : "Nuevo perfil",
+    texto: duplicar
+      ? "Copia los ajustes y la instrucción del perfil activo."
+      : "Empieza con los valores de fábrica.",
+    valor: "",
+    aceptar: duplicar ? "Duplicar" : "Crear",
+  });
+  if (nombre === null) return;
+
+  try {
+    const datos = await pedirPerfiles("/api/perfiles", {
+      method: "POST",
+      body: JSON.stringify({ nombre, duplicar }),
+    });
+    await aplicarRespuestaPerfil(datos);
+  } catch (error) {
+    avisarPerfil(`No se pudo crear el perfil: ${error.message}`, "error");
+  }
+}
+
+async function renombrarPerfil() {
+  const id = perfilesUI.select.value;
+  if (!id) return;
+
+  const actual = perfilesUI.select.selectedOptions[0]?.textContent || "";
+  const nombre = await preguntar({
+    titulo: "Renombrar perfil",
+    texto: "El identificador interno no cambia: solo el nombre visible.",
+    valor: actual,
+    aceptar: "Renombrar",
+  });
+  if (nombre === null || nombre === actual) return;
+
+  try {
+    const datos = await pedirPerfiles(`/api/perfiles/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ nombre }),
+    });
+    renderPerfiles(datos);
+  } catch (error) {
+    avisarPerfil(`No se pudo renombrar: ${error.message}`, "error");
+  }
+}
+
+async function eliminarPerfil() {
+  const id = perfilesUI.select.value;
+  if (!id) return;
+
+  const nombre = perfilesUI.select.selectedOptions[0]?.textContent || "";
+  const activo = id === perfilActivo;
+  const seguro = await preguntar({
+    titulo: "Eliminar perfil",
+    texto: activo
+      ? `«${nombre}» es el perfil activo. Si lo borras, se aplicará otro.`
+      : `Se borrarán los ajustes y la instrucción de «${nombre}».`,
+    aceptar: "Eliminar",
+    peligro: true,
+  });
+  if (!seguro) return;
+
+  try {
+    const datos = await pedirPerfiles(`/api/perfiles/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    await aplicarRespuestaPerfil(datos);
+  } catch (error) {
+    avisarPerfil(`No se pudo eliminar: ${error.message}`, "error");
+  }
+}
+
+async function guardarInstruccion() {
+  if (!perfilActivo) return;
+
+  const texto = perfilesUI.instruccion.value.trim();
+  if (!texto) {
+    avisarPerfil(
+      "La instrucción no puede quedar vacía. Usa «Texto de fábrica» si quieres volver.",
+      "error"
+    );
+    return;
+  }
+
+  perfilesUI.guardar.disabled = true;
+  perfilesUI.guardar.textContent = "Guardando…";
+  try {
+    const datos = await pedirPerfiles(
+      `/api/perfiles/${encodeURIComponent(perfilActivo)}/instruccion`,
+      { method: "PUT", body: JSON.stringify({ instruccion: texto }) }
+    );
+    instruccionGuardada = datos.instruccion || texto;
+    perfilesUI.instruccion.value = instruccionGuardada;
+    actualizarInstruccion();
+    avisarPerfil(
+      (datos.avisos || []).join("\n") || "Instrucción guardada.",
+      "ok"
+    );
+  } catch (error) {
+    avisarPerfil(`No se pudo guardar la instrucción: ${error.message}`, "error");
+  } finally {
+    perfilesUI.guardar.textContent = "Guardar instrucción";
+    actualizarInstruccion();
+  }
+}
+
+function cargarTextoDeFabrica() {
+  perfilesUI.instruccion.value = instruccionFabrica;
+  actualizarInstruccion();
+  avisarPerfil(
+    "Texto de fábrica cargado. Pulsa «Guardar instrucción» para aplicarlo.",
+    "info"
+  );
+}
 
 function numeroDe(texto) {
   const numero = Number.parseFloat(String(texto).replace(",", "."));
@@ -547,7 +905,7 @@ function actualizarGuardar() {
 /* Ni los ajustes a medio editar ni un mensaje sin enviar deben perderse al
    cerrar la pestaña. El navegador decide el texto del diálogo. */
 window.addEventListener("beforeunload", (evento) => {
-  if (camposModificados.size === 0 && !chat.entrada.value.trim()) return;
+  if (!hayCambiosSinGuardar()) return;
   evento.preventDefault();
   evento.returnValue = "";
 });
@@ -608,9 +966,12 @@ async function guardarAjustes() {
 }
 
 async function restaurarAjustes() {
-  const seguro = window.confirm(
-    "¿Volver a los valores de fábrica? Se sobrescribe config.json."
-  );
+  const seguro = await preguntar({
+    titulo: "Valores de fábrica",
+    texto: "¿Volver a los valores de fábrica? Se sobrescribe config.json y los ajustes de este perfil.",
+    aceptar: "Restaurar",
+    peligro: true,
+  });
   if (!seguro) return;
 
   try {
@@ -821,9 +1182,20 @@ ajustes.guardar.addEventListener("click", guardarAjustes);
 ajustes.restaurar.addEventListener("click", restaurarAjustes);
 ajustes.probar.addEventListener("click", probarVoz);
 
+perfilesUI.select.addEventListener("change", actualizarBotonActivar);
+perfilesUI.activar.addEventListener("click", activarPerfilSeleccionado);
+perfilesUI.nuevo.addEventListener("click", () => crearPerfil(false));
+perfilesUI.duplicar.addEventListener("click", () => crearPerfil(true));
+perfilesUI.renombrar.addEventListener("click", renombrarPerfil);
+perfilesUI.eliminar.addEventListener("click", eliminarPerfil);
+perfilesUI.instruccion.addEventListener("input", actualizarInstruccion);
+perfilesUI.guardar.addEventListener("click", guardarInstruccion);
+perfilesUI.fabrica.addEventListener("click", cargarTextoDeFabrica);
+
 actualizarVacio();
 conectar();
 consultar();
 cargarAjustes();
+cargarPerfiles();
 cargarListas();
 setInterval(consultar, 1000);

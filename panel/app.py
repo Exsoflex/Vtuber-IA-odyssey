@@ -40,7 +40,9 @@ from core import config, tts
 from core.audio_devices import buscar_dispositivo
 from core.idiomas import tono_activo, voz_activa
 from core.motor import MotorNiu
+from core.perfiles import InstruccionInvalida, NombreInvalido, PerfilNoExiste, PerfilUnico
 from core.vts_client import vts_client
+from panel import perfiles as panel_perfiles
 from panel.ajustes import (
     MotorOcupado,
     URL_OLLAMA,
@@ -70,6 +72,21 @@ class PruebaVoz(BaseModel):
     tono: str | None = None
     velocidad: str | None = None
     idioma: str | None = None
+
+
+class NuevoPerfil(BaseModel):
+    """`POST /api/perfiles`: nombre y si se copia el perfil activo."""
+
+    nombre: str = ""
+    duplicar: bool = False
+
+
+class NombrePerfil(BaseModel):
+    nombre: str = ""
+
+
+class InstruccionPerfil(BaseModel):
+    instruccion: str = ""
 
 
 # ─── Comprobaciones de estado ──────────────────────────────────────────
@@ -137,6 +154,14 @@ def crear_app() -> FastAPI:
 
     @asynccontextmanager
     async def ciclo(app: FastAPI):
+        # El perfil activo manda antes de crear el motor: este captura idioma,
+        # modelos y micrófono al arrancar. Si el archivo de perfiles estuviera
+        # roto, se sigue con `config.json` en vez de dejar el panel sin abrir.
+        try:
+            panel_perfiles.aplicar_activo()
+        except Exception as e:      # pragma: no cover - defensa de arranque
+            print(f"[PERFILES] No se pudo aplicar el perfil activo: {e}")
+
         # permitir_texto: el panel puede escribirle a Niu aunque no haya
         # micrófono. El teclado sigue apagado porque `input()` no se puede
         # cancelar desde el botón Detener.
@@ -298,6 +323,55 @@ def crear_app() -> FastAPI:
             )
         except MotorOcupado as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
+
+    # ─── Perfiles ──────────────────────────────────────────────────────
+
+    @app.get("/api/perfiles")
+    async def obtener_perfiles() -> dict[str, Any]:
+        return panel_perfiles.estado()
+
+    @app.post("/api/perfiles")
+    async def crear_perfil(entrada: NuevoPerfil) -> dict[str, Any]:
+        try:
+            return panel_perfiles.crear(entrada.nombre, duplicar=entrada.duplicar)
+        except NombreInvalido as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+
+    @app.put("/api/perfiles/{perfil_id}")
+    async def renombrar_perfil(perfil_id: str,
+                               entrada: NombrePerfil) -> dict[str, Any]:
+        try:
+            return panel_perfiles.renombrar(perfil_id, entrada.nombre)
+        except PerfilNoExiste as e:
+            raise HTTPException(status_code=404, detail=str(e)) from None
+        except NombreInvalido as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+
+    @app.delete("/api/perfiles/{perfil_id}")
+    async def borrar_perfil(perfil_id: str) -> dict[str, Any]:
+        try:
+            return panel_perfiles.eliminar(perfil_id)
+        except PerfilNoExiste as e:
+            raise HTTPException(status_code=404, detail=str(e)) from None
+        except PerfilUnico as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+
+    @app.post("/api/perfiles/{perfil_id}/activar")
+    async def activar_perfil(perfil_id: str) -> dict[str, Any]:
+        try:
+            return panel_perfiles.activar(perfil_id)
+        except PerfilNoExiste as e:
+            raise HTTPException(status_code=404, detail=str(e)) from None
+
+    @app.put("/api/perfiles/{perfil_id}/instruccion")
+    async def guardar_instruccion(perfil_id: str,
+                                  entrada: InstruccionPerfil) -> dict[str, Any]:
+        try:
+            return panel_perfiles.guardar_instruccion(perfil_id, entrada.instruccion)
+        except PerfilNoExiste as e:
+            raise HTTPException(status_code=404, detail=str(e)) from None
+        except InstruccionInvalida as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
 
     @app.get("/api/dispositivos")
     async def dispositivos() -> dict[str, Any]:

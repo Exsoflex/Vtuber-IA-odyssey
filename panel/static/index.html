@@ -30,6 +30,62 @@
     <p class="aviso" id="aviso" role="alert" hidden></p>
 
     <div class="columna columna-mando">
+      <section class="tarjeta tarjeta-perfil" aria-labelledby="t-perfil">
+        <h2 id="t-perfil">Perfil</h2>
+
+        <div class="perfil-cabecera">
+          <label class="perfil-etiqueta" for="perfil-select">Perfil activo</label>
+          <div class="perfil-fila">
+            <select class="ajustes-control" id="perfil-select" name="perfil">
+              <option value="">Cargando…</option>
+            </select>
+            <button type="button" class="boton-mini primario-mini" id="btn-perfil-activar"
+                    title="Aplicar los ajustes de este perfil" disabled>
+              Activar
+            </button>
+          </div>
+        </div>
+
+        <div class="grupo-botones" role="group" aria-label="Gestionar perfiles">
+          <button type="button" class="boton-mini" id="btn-perfil-nuevo"
+                  title="Crear un perfil con valores de fábrica">Nuevo</button>
+          <button type="button" class="boton-mini" id="btn-perfil-duplicar"
+                  title="Copiar los ajustes y la instrucción del perfil activo">Duplicar</button>
+          <button type="button" class="boton-mini" id="btn-perfil-renombrar"
+                  title="Cambiar el nombre del perfil seleccionado">Renombrar</button>
+          <button type="button" class="boton-mini peligro-mini" id="btn-perfil-eliminar"
+                  title="Borrar el perfil seleccionado">Eliminar</button>
+        </div>
+
+        <p class="ajustes-aviso perfil-aviso" id="perfil-aviso" role="status" hidden></p>
+
+        <details class="ajustes-avanzados perfil-instruccion">
+          <summary>Instrucción del sistema</summary>
+          <div class="perfil-instruccion-caja">
+            <label class="oculto" for="perfil-instruccion">Instrucción del sistema del perfil</label>
+            <p class="ajustes-nota perfil-instruccion-nota" id="perfil-instruccion-nota" hidden>
+              Este perfil no está activo. Actívalo para editar su instrucción.
+            </p>
+            <textarea class="ajustes-control perfil-texto" id="perfil-instruccion"
+                      name="instruccion" rows="12" spellcheck="false" autocomplete="off"></textarea>
+            <p class="ajustes-nota">
+              Define cómo habla Niu en este perfil. Se aplica en el siguiente turno.
+              «Texto de fábrica» rellena el editor; no guarda hasta que pulses el botón.
+            </p>
+            <div class="grupo-botones" role="group" aria-label="Acciones de la instrucción">
+              <button type="button" class="boton-mini primario-mini" id="btn-instruccion-guardar"
+                      disabled>
+                Guardar instrucción
+              </button>
+              <button type="button" class="boton-mini" id="btn-instruccion-fabrica"
+                      title="Rellenar con la instrucción original de Niu">
+                Texto de fábrica
+              </button>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <section class="tarjeta tarjeta-motor" aria-labelledby="t-motor">
         <h2 id="t-motor">Motor</h2>
 
@@ -134,6 +190,22 @@
       </section>
     </div>
   </main>
+
+  <dialog class="dialogo" id="dialogo" aria-labelledby="dialogo-titulo">
+    <form class="dialogo-caja" id="dialogo-form" method="dialog">
+      <h2 class="dialogo-titulo" id="dialogo-titulo"></h2>
+      <p class="dialogo-texto" id="dialogo-texto" hidden></p>
+      <label class="perfil-etiqueta" id="dialogo-etiqueta" for="dialogo-campo" hidden>
+        Nombre
+      </label>
+      <input class="ajustes-control" id="dialogo-campo" name="valor" type="text"
+             maxlength="40" autocomplete="off" hidden>
+      <div class="grupo-botones">
+        <button type="button" class="boton-mini" id="dialogo-cancelar">Cancelar</button>
+        <button type="submit" class="boton-mini primario-mini" id="dialogo-aceptar">Aceptar</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/estaticos/app.js"></script>
 </body>

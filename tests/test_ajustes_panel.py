@@ -26,17 +26,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from core import config, tts
+from core import config, perfiles, tts
 from panel import ajustes as panel_ajustes
 
 
 @pytest.fixture(autouse=True)
 def entorno(monkeypatch, tmp_path):
-    """Ajustes de fábrica, sin `.env` y con `config.json` en un temporal."""
+    """Ajustes de fábrica, sin `.env`, con config y perfiles temporales."""
     for variable in config.VARIABLES_ENTORNO.values():
         monkeypatch.delenv(variable, raising=False)
 
     monkeypatch.setattr(config, "RUTA_CONFIG", tmp_path / "config.json")
+    monkeypatch.setattr(perfiles, "RUTA_PERFILES", tmp_path / "perfiles.json")
     original = config.ajustes()
     config.fijar_ajustes(config.por_defecto())
     try:

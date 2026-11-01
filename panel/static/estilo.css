@@ -251,6 +251,91 @@ button, input, select, summary, a {
   text-wrap: balance;
 }
 
+/* ─── Perfil ───────────────────────────────────────────────────────────── */
+
+.perfil-cabecera {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.perfil-etiqueta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--tinta-suave);
+}
+
+.perfil-fila {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* `min-width: 0` deja que el select encoja en vez de desbordar la tarjeta. */
+.perfil-fila .ajustes-control { flex: 1; min-width: 0; }
+.perfil-fila .boton-mini { flex: none; }
+
+.perfil-aviso { margin: 14px 0 0; }
+
+.perfil-instruccion { margin-top: 16px; }
+
+.perfil-instruccion-caja {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.perfil-texto {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: var(--fuente);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+/* ─── Diálogo ──────────────────────────────────────────────────────────── */
+
+/* Un `<dialog>` propio en vez de `prompt()`/`confirm()`: el navegador
+   integrado de la aplicación no soporta los diálogos nativos. */
+.dialogo {
+  width: min(420px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--borde-fuerte);
+  border-radius: var(--radio);
+  background: var(--superficie-fuerte);
+  color: var(--tinta);
+  box-shadow: var(--sombra);
+}
+
+.dialogo::backdrop {
+  background: rgba(10, 14, 30, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.dialogo-caja {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+}
+
+.dialogo-titulo {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--tinta);
+}
+
+.dialogo-texto {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--tinta-suave);
+}
+
 /* ─── Botones ──────────────────────────────────────────────────────────── */
 
 .acciones {
@@ -727,6 +812,9 @@ button, input, select, summary, a {
   color: var(--tinta-suave);
 }
 
+/* El editor de instrucción está bloqueado porque el perfil no está activo. */
+.perfil-instruccion-nota { color: var(--ambar); }
+
 .ajustes-aviso {
   margin: 0 0 16px;
   padding: 10px 14px;
@@ -817,11 +905,12 @@ button, input, select, summary, a {
   .chat-registro { flex: none; min-height: 260px; max-height: min(52vh, 520px); }
 
   .aviso { order: 0; }
-  .tarjeta-motor { order: 1; }
-  .tarjeta-estado { order: 2; }
-  .chat { order: 3; }
-  .tarjeta-voz { order: 4; }
-  .tarjeta-ajustes { order: 5; }
+  .tarjeta-perfil { order: 1; }
+  .tarjeta-motor { order: 2; }
+  .tarjeta-estado { order: 3; }
+  .chat { order: 4; }
+  .tarjeta-voz { order: 5; }
+  .tarjeta-ajustes { order: 6; }
 }
 
 @media (max-width: 480px) {

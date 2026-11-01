@@ -247,6 +247,34 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 
 ---
 
+# 🎯 FASE 3.6: PERFILES Y PERSONALIDAD — COMPLETADA ✅
+
+Objetivo: poder tener varias Nius con ajustes y personalidad propios, y que editar
+cómo habla no obligue a reiniciar el motor.
+
+| Tarea | Descripción | Estado |
+|-------|-------------|--------|
+| Perfiles | `core/perfiles.py`: `perfiles.json` con ajustes + instrucción, perfil activo, ids únicos y escritura atómica | ✅ |
+| Aplicar el perfil | `panel/perfiles.py` + endpoints: activar, crear, duplicar, renombrar y eliminar; al arrancar manda el activo | ✅ |
+| Instrucción editable | Editor plegable en el panel, «Texto de fábrica» y aviso de que se aplica en el turno siguiente | ✅ |
+| Personalidad natural | `core/personalidad.py`: habla como una persona, con muletillas variadas y sin tono de asistente | ✅ |
+| Diálogo propio | `<dialog>` en vez de `prompt()`/`confirm()`, que el navegador integrado no soporta | ✅ |
+
+### Lo que costó encontrarlo
+
+El CRUD de perfiles se probó en un navegador de escritorio y funcionaba; en el
+navegador integrado de la aplicación, `prompt()` no existe y el botón «Nuevo» no
+hacía nada. El fallo no dejaba rastro en la interfaz: solo en la consola. De ahí
+que el panel use un `<dialog>` propio, y que la verificación incluya el navegador
+donde de verdad se usa.
+
+La otra trampa fue tener dos archivos con los mismos datos. La regla que quedó:
+**el perfil activo manda** y `config.json` es su copia viva para la CLI. Sin esa
+jerarquía, cambiar un valor en un sitio y no en el otro habría dado diferencias
+imposibles de explicar.
+
+---
+
 # 🎯 FASE 4: EXPERIENCIA DE USUARIO
 
 | Tarea | Descripción |
