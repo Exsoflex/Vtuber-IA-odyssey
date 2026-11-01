@@ -5,6 +5,8 @@
    ──────────────────────────────────────────────────────────────────────── */
 
 :root {
+  color-scheme: light;
+
   --fondo: #f6f9ff;
   --superficie: rgba(255, 255, 255, 0.74);
   --superficie-fuerte: rgba(255, 255, 255, 0.92);
@@ -41,6 +43,41 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* En puntero táctil, quitar el retardo de doble toque y el destello azul del
+   sistema: el estado lo dan los estilos de :active. */
+button, input, select, summary, a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Saltar al contenido: invisible hasta que recibe el foco por teclado. */
+.salto {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--azul);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-240%);
+  transition: transform 0.15s ease;
+}
+
+.salto:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid rgba(61, 123, 253, 0.45);
+  outline-offset: 3px;
+}
+
+#contenido:focus-visible {
+  outline: 2px solid var(--azul);
+  outline-offset: 8px;
+  border-radius: 20px;
+}
+
 /* Campo de estrellas: tres capas de puntos muy tenues, sin animación. */
 .cielo {
   position: fixed;
@@ -65,17 +102,20 @@ body {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto 28px;
 }
 
-.marca { display: flex; align-items: center; gap: 16px; }
+.marca { display: flex; align-items: center; gap: 16px; min-width: 0; }
+
+.marca-texto { min-width: 0; }
 
 .marca-texto h1 {
   margin: 0;
   font-size: 1.6rem;
   font-weight: 650;
   letter-spacing: 0.04em;
+  text-wrap: balance;
 }
 
 .marca-texto p {
@@ -166,14 +206,29 @@ body {
 .pastilla[data-estado="pensando"] .pastilla-punto { background: var(--azul); box-shadow: 0 0 0 4px rgba(61, 123, 253, 0.16); }
 .pastilla[data-estado="hablando"] .pastilla-punto { background: var(--violeta); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18); }
 
-/* ─── Rejilla y tarjetas ───────────────────────────────────────────────── */
+/* ─── Disposición: mando a la izquierda, conversación a la derecha ─────── */
 
-.rejilla {
+.disposicion {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
+  align-items: start;
   gap: 20px;
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
+}
+
+.columna {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* La conversación se queda a la vista mientras se recorren los ajustes. */
+.columna-chat {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
 }
 
 .tarjeta {
@@ -183,9 +238,8 @@ body {
   background: var(--superficie);
   backdrop-filter: blur(14px);
   box-shadow: var(--sombra);
+  scroll-margin-top: 20px;
 }
-
-.tarjeta.ancha { grid-column: 1 / -1; }
 
 .tarjeta h2 {
   margin: 0 0 16px;
@@ -194,6 +248,7 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--tinta-suave);
+  text-wrap: balance;
 }
 
 /* ─── Botones ──────────────────────────────────────────────────────────── */
@@ -319,6 +374,13 @@ body {
 
 /* ─── Chat ─────────────────────────────────────────────────────────────── */
 
+.chat {
+  display: flex;
+  flex-direction: column;
+  /* Ocupa la ventana sin llegar a ser una columna infinita. */
+  height: clamp(520px, calc(100dvh - 132px), 940px);
+}
+
 .chat-cabecera {
   display: flex;
   align-items: center;
@@ -326,11 +388,12 @@ body {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+  min-width: 0;
 }
 
 .chat-cabecera h2 { margin: 0; }
 
-.chat-botones {
+.grupo-botones {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -368,9 +431,9 @@ body {
 .chat-registro {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 12px;
-  min-height: 260px;
-  max-height: min(52vh, 520px);
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 6px 4px 12px;
@@ -484,7 +547,10 @@ body {
   min-width: 110px;
 }
 
-.chat-nota { font-size: 0.78rem; }
+.chat-nota { font-size: 0.78rem; overflow-wrap: anywhere; }
+
+/* La ruta de la sesión puede ser larga: que no ensanche la tarjeta. */
+.chat-nota code { word-break: break-all; }
 
 .oculto {
   position: absolute;
@@ -558,7 +624,7 @@ body {
 
 .ajustes-campos {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 16px 22px;
 }
 
@@ -635,7 +701,13 @@ body {
 .ajustes-rango input[type="range"] {
   flex: 1;
   min-width: 0;
+  border-radius: 6px;
   accent-color: var(--azul);
+}
+
+.ajustes-rango input[type="range"]:focus-visible {
+  outline: 3px solid rgba(61, 123, 253, 0.45);
+  outline-offset: 2px;
 }
 
 .ajustes-rango output {
@@ -645,6 +717,8 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--tinta-suave);
 }
+
+.ajustes-rango:focus-within output { color: var(--azul); }
 
 .ajustes-nota {
   margin: 0;
@@ -700,8 +774,8 @@ body {
 /* ─── Aviso de error ───────────────────────────────────────────────────── */
 
 .aviso {
-  max-width: 1080px;
-  margin: 20px auto 0;
+  grid-column: 1 / -1;
+  margin: 0;
   padding: 14px 18px;
   border: 1px solid rgba(229, 86, 106, 0.35);
   border-radius: 12px;
@@ -714,10 +788,40 @@ body {
 /* ─── Movimiento reducido ──────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .cielo { opacity: 0.2; }
   .orbita::after { animation: none !important; }
-  .boton { transition: none; }
   .mensaje[data-parcial="true"] .mensaje-texto::after { animation: none; }
+}
+
+/* ─── Una sola columna ─────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .disposicion {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Las columnas dejan de ser cajas para poder intercalar la conversación
+     entre el estado y los ajustes: en el móvil, hablar va antes que afinar. */
+  .columna { display: contents; }
+  .columna-chat { position: static; }
+
+  .chat { height: auto; }
+  .chat-registro { flex: none; min-height: 260px; max-height: min(52vh, 520px); }
+
+  .aviso { order: 0; }
+  .tarjeta-motor { order: 1; }
+  .tarjeta-estado { order: 2; }
+  .chat { order: 3; }
+  .tarjeta-voz { order: 4; }
+  .tarjeta-ajustes { order: 5; }
 }
 
 @media (max-width: 480px) {

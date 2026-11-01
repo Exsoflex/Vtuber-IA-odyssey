@@ -32,6 +32,9 @@ const botones = {
   limpiar: document.getElementById("btn-limpiar"),
 };
 
+/** Región viva para cambios que no ocurren dentro del foco. */
+const copiarEstado = document.getElementById("copiar-estado");
+
 const pastilla = document.getElementById("pastilla");
 const pastillaTexto = document.getElementById("pastilla-texto");
 const orbita = document.getElementById("orbita");
@@ -57,13 +60,33 @@ let estadoActual = "apagado";
 
 /* ─── Chat ────────────────────────────────────────────────────────────── */
 
+/* El idioma de la interfaz manda en los formatos: coma decimal en español,
+   hora de 24 h o AM/PM según el navegador. Nada de cortar cadenas ISO. */
+const IDIOMA_UI = document.documentElement.lang || "es";
+const FORMATO_HORA = new Intl.DateTimeFormat(IDIOMA_UI, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const FORMATO_DECIMAL = new Intl.NumberFormat(IDIOMA_UI, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const FORMATO_ENTERO = new Intl.NumberFormat(IDIOMA_UI, {
+  maximumFractionDigits: 0,
+});
+
+function formatearHora(iso) {
+  const fecha = new Date(iso);
+  return Number.isNaN(fecha.getTime()) ? "" : FORMATO_HORA.format(fecha);
+}
+
 function resumenMetricas(tiempos) {
   const numero = (valor) => Number(valor) || 0;
-  const segundos = (valor) => `${numero(valor).toFixed(2)} s`;
+  const segundos = (valor) => `${FORMATO_DECIMAL.format(numero(valor))} s`;
   const hastaSonido = ["stt", "texto", "sintesis", "preparacion"]
     .reduce((total, clave) => total + numero(tiempos[clave]), 0);
 
-  const partes = [`1er sonido ${hastaSonido.toFixed(2)} s`];
+  const partes = [`1er sonido ${FORMATO_DECIMAL.format(hastaSonido)} s`];
   // El STT no existe cuando el mensaje se escribió en el chat: no se inventa
   // un 0,00 s que parezca una medida.
   if ("stt" in tiempos) partes.push(`STT ${segundos(tiempos.stt)}`);
@@ -71,7 +94,7 @@ function resumenMetricas(tiempos) {
   partes.push(`voz ${segundos(tiempos.voz)}`);
   if (tiempos.partes) {
     const n = Math.round(numero(tiempos.partes));
-    partes.push(n === 1 ? "1 parte" : `${n} partes`);
+    partes.push(n === 1 ? "1 parte" : `${FORMATO_ENTERO.format(n)} partes`);
   }
   return partes.join(" · ");
 }
@@ -118,9 +141,10 @@ function pintarMensaje(mensaje) {
   const meta = nodo.querySelector(".mensaje-meta");
   meta.replaceChildren();
   if (mensaje.papel !== "sistema") {
-    if (mensaje.hora) {
+    const textoHora = formatearHora(mensaje.hora || "");
+    if (textoHora) {
       const hora = document.createElement("span");
-      hora.textContent = mensaje.hora.slice(11, 16);
+      hora.textContent = textoHora;
       meta.append(hora);
     }
     if (mensaje.metricas && mensaje.papel === "niu") {
@@ -235,7 +259,13 @@ async function copiarConversacion() {
     await navigator.clipboard.writeText(lineas.join("\n"));
     const original = botones.copiar.textContent;
     botones.copiar.textContent = "Copiado";
-    setTimeout(() => { botones.copiar.textContent = original; }, 1500);
+    // El botón cambia de texto, pero el foco puede estar en otro sitio: el
+    // estado oculto es lo que anuncia el cambio a quien usa lector de pantalla.
+    copiarEstado.textContent = "Conversación copiada.";
+    setTimeout(() => {
+      botones.copiar.textContent = original;
+      copiarEstado.textContent = "";
+    }, 1500);
   } catch {
     mostrarAviso("El navegador no dejó copiar. Selecciona el texto a mano.");
   }
@@ -287,6 +317,8 @@ let camposAjustes = [];
 let valoresGuardados = {};
 /** Campos que el usuario tocó de verdad. */
 let camposModificados = new Set();
+/** La prueba de voz bloquea el botón aunque el sondeo diga «escuchando». */
+let probandoVoz = false;
 
 const LISTAS = {
   voces: "lista-voces",
@@ -352,16 +384,23 @@ function crearControl(campo, valor) {
     control.step = campo.paso;
     control.value = numeroDe(valor);
     const salida = document.createElement("output");
-    salida.textContent = textoDeControl(campo, valor);
-    control.addEventListener("input", () => {
-      salida.textContent = textoDeControl(campo, control.value);
-    });
+    const sincronizar = (numero) => {
+      const texto = textoDeControl(campo, numero);
+      salida.textContent = texto;
+      // El lector de pantalla necesita la unidad: «+25 Hz», no «25».
+      control.setAttribute("aria-valuetext", texto);
+    };
+    sincronizar(control.value);
+    control.addEventListener("input", () => sincronizar(control.value));
     fila.append(control, salida);
     return { control, nodo: fila };
   }
 
   const control = document.createElement("input");
   control.className = "ajustes-control";
+  // Ningún ajuste es credencial ni dirección: que el gestor de contraseñas no
+  // ofrezca rellenarlos.
+  control.autocomplete = "off";
   if (campo.tipo === "numero") {
     control.type = "number";
     control.min = campo.minimo;
@@ -369,7 +408,6 @@ function crearControl(campo, valor) {
     control.step = campo.paso;
   } else {
     control.type = "text";
-    control.autocomplete = "off";
     control.spellcheck = false;
     if (campo.fuente && LISTAS[campo.fuente]) control.setAttribute("list", LISTAS[campo.fuente]);
   }
@@ -408,6 +446,7 @@ function crearCampo(campo, valor) {
 
   const { control, nodo } = crearControl(campo, valor);
   control.id = id;
+  control.name = campo.campo;
   control.dataset.campo = campo.campo;
   const marcar = () => {
     camposModificados.add(campo.campo);
@@ -421,8 +460,10 @@ function crearCampo(campo, valor) {
   if (campo.nota) {
     const nota = document.createElement("p");
     nota.className = "ajustes-nota";
+    nota.id = `${id}-nota`;
     nota.textContent = campo.nota;
     caja.append(nota);
+    control.setAttribute("aria-describedby", nota.id);
   }
   return caja;
 }
@@ -502,6 +543,14 @@ function cambiosPendientes() {
 function actualizarGuardar() {
   ajustes.guardar.disabled = Object.keys(cambiosPendientes()).length === 0;
 }
+
+/* Ni los ajustes a medio editar ni un mensaje sin enviar deben perderse al
+   cerrar la pestaña. El navegador decide el texto del diálogo. */
+window.addEventListener("beforeunload", (evento) => {
+  if (camposModificados.size === 0 && !chat.entrada.value.trim()) return;
+  evento.preventDefault();
+  evento.returnValue = "";
+});
 
 function avisarAjustes(texto, tipo = "info") {
   ajustes.aviso.hidden = !texto;
@@ -583,6 +632,7 @@ async function restaurarAjustes() {
 
 async function probarVoz() {
   const valores = lecturas();
+  probandoVoz = true;
   ajustes.probar.disabled = true;
   ajustes.probar.textContent = "Probando…";
   try {
@@ -607,6 +657,7 @@ async function probarVoz() {
   } catch (error) {
     avisarAjustes(`La prueba de voz falló: ${error.message}`, "error");
   } finally {
+    probandoVoz = false;
     ajustes.probar.textContent = "Probar voz";
     ajustes.probar.disabled = ["pensando", "hablando"].includes(estadoActual);
   }
@@ -691,10 +742,13 @@ function pintar(datos) {
   chat.enviar.disabled = !motorConTexto;
   chat.entrada.placeholder = motorConTexto
     ? "Escribe a Niu…"
-    : "Inicia el motor para escribir";
+    : "Inicia el motor para escribir…";
 
   // La prueba de voz pelearía con la voz de Niu por el mismo stream de audio.
-  if (["pensando", "hablando"].includes(estado)) {
+  if (probandoVoz) {
+    ajustes.probar.disabled = true;
+    ajustes.probar.title = "Reproduciendo la prueba…";
+  } else if (["pensando", "hablando"].includes(estado)) {
     ajustes.probar.disabled = true;
     ajustes.probar.title = "Niu está hablando: espera a que termine.";
   } else {

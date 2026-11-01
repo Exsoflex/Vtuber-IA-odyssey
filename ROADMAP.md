@@ -243,6 +243,7 @@ Plan completo y decisiones de diseño: [`PLAN_PANEL.md`](PLAN_PANEL.md).
 | Vista de chat | Chat con streaming en vivo, métricas por turno, entrada de texto y sesión en `sesiones/*.json` | ✅ |
 | Ajustes en la UI | Esquema del servidor, guardado validado con avisos, avanzados plegados, «restaurar» y «probar voz» | ✅ |
 | Tema espacial | Blanco azulado, azules/violetas, vidrio suave y campo de estrellas | ✅ |
+| Disposición y accesibilidad | Dos columnas (mando izquierda, chat derecha), chat `sticky`, una columna en móvil; revisión con Web Interface Guidelines | ✅ |
 
 ---
 

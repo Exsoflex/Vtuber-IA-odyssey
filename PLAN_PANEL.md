@@ -249,7 +249,7 @@ Cada fase deja el programa funcionando. Ninguna exige reescribir la siguiente.
 | **2. Panel mínimo** | FastAPI + uvicorn en `127.0.0.1`, arrancar/parar, chips de estado | se abre en el navegador y opera el motor | 1 |
 | **3. Chat** | WebSocket con fragmentos, transcripción y métricas en vivo | el texto aparece al mismo ritmo que la voz | 1 |
 | **4. Ajustes** | las 10 esenciales + avanzados + restaurar + probar voz | cambiar voz y tono desde la UI y oírlo | 1–2 |
-| **5. Pulido** | tema espacial, logs, presets, exportar sesión, accesibilidad | revisión con `web-design-guidelines` | 1 |
+| **5. Pulido** | tema espacial, disposición en dos columnas, exportar sesión, accesibilidad | revisión con `web-design-guidelines`; quedan logging estructurado y presets | 1 |
 
 El orden no es negociable en las fases 0 y 1: son las que evitan que el panel
 sea una cáscara bonita sobre valores que no se aplican.

@@ -4,16 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f9ff">
   <title>Niu · Panel de control</title>
   <link rel="stylesheet" href="/estaticos/estilo.css">
 </head>
 <body>
   <div class="cielo" aria-hidden="true"></div>
+  <a class="salto" href="#contenido">Saltar al contenido</a>
 
   <header class="cabecera">
     <div class="marca">
       <span class="orbita" id="orbita" data-estado="apagado" aria-hidden="true"></span>
-      <div class="marca-texto">
+      <div class="marca-texto" translate="no">
         <h1>Niu</h1>
         <p>Autonomous Engine</p>
       </div>
@@ -24,108 +26,114 @@
     </p>
   </header>
 
-  <main class="rejilla">
-    <section class="tarjeta" aria-labelledby="t-motor">
-      <h2 id="t-motor">Motor</h2>
+  <main class="disposicion" id="contenido" tabindex="-1">
+    <p class="aviso" id="aviso" role="alert" hidden></p>
 
-      <div class="acciones">
-        <button type="button" class="boton primario" id="btn-iniciar">Iniciar</button>
-        <button type="button" class="boton peligro" id="btn-detener">Detener</button>
-      </div>
+    <div class="columna columna-mando">
+      <section class="tarjeta tarjeta-motor" aria-labelledby="t-motor">
+        <h2 id="t-motor">Motor</h2>
 
-      <button type="button" class="boton fantasma" id="btn-voz">Detener voz</button>
-      <p class="nota"><strong>Detener voz</strong> la calla sin cerrar la sesión:
-        el motor sigue escuchando.</p>
-    </section>
-
-    <section class="tarjeta" aria-labelledby="t-estado">
-      <h2 id="t-estado">Estado</h2>
-      <ul class="chips" id="chips">
-        <li class="chip" data-clave="motor"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Motor</span><span class="chip-valor">—</span></li>
-        <li class="chip" data-clave="ollama"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Ollama</span><span class="chip-valor">—</span></li>
-        <li class="chip" data-clave="vts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">VTube Studio</span><span class="chip-valor">—</span></li>
-        <li class="chip" data-clave="microfono"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Micrófono</span><span class="chip-valor">—</span></li>
-        <li class="chip" data-clave="tts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">TTS</span><span class="chip-valor">—</span></li>
-      </ul>
-    </section>
-
-    <section class="tarjeta ancha chat" aria-labelledby="t-chat">
-      <div class="chat-cabecera">
-        <h2 id="t-chat">Conversación</h2>
-        <div class="chat-botones">
-          <button type="button" class="boton-mini" id="btn-copiar"
-                  title="Copiar la conversación como texto">Copiar</button>
-          <button type="button" class="boton-mini" id="btn-exportar"
-                  title="Descargar la sesión en Markdown">Exportar .md</button>
-          <button type="button" class="boton-mini peligro-mini" id="btn-limpiar"
-                  title="Empezar una sesión nueva">Limpiar</button>
+        <div class="acciones">
+          <button type="button" class="boton primario" id="btn-iniciar">Iniciar</button>
+          <button type="button" class="boton peligro" id="btn-detener">Detener</button>
         </div>
-      </div>
 
-      <div class="chat-registro" id="chat-registro" role="log" aria-live="polite"
-           aria-label="Conversación con Niu">
-        <p class="chat-vacio" id="chat-vacio">Inicia el motor y háblale, o escribe abajo.</p>
-      </div>
+        <button type="button" class="boton fantasma" id="btn-voz">Detener voz</button>
+        <p class="nota"><strong>Detener voz</strong> la calla sin cerrar la sesión:
+          el motor sigue escuchando.</p>
+      </section>
 
-      <form class="chat-form" id="chat-form">
-        <label class="oculto" for="chat-entrada">Mensaje para Niu</label>
-        <input class="chat-entrada" id="chat-entrada" type="text" autocomplete="off"
-               placeholder="Inicia el motor para escribir" maxlength="2000" disabled>
-        <button type="submit" class="boton primario chat-enviar" id="btn-enviar" disabled>
-          Enviar
-        </button>
-      </form>
+      <section class="tarjeta tarjeta-estado" aria-labelledby="t-estado">
+        <h2 id="t-estado">Estado</h2>
+        <ul class="chips" id="chips">
+          <li class="chip" data-clave="motor"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Motor</span><span class="chip-valor">—</span></li>
+          <li class="chip" data-clave="ollama"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Ollama</span><span class="chip-valor">—</span></li>
+          <li class="chip" data-clave="vts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">VTube Studio</span><span class="chip-valor">—</span></li>
+          <li class="chip" data-clave="microfono"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">Micrófono</span><span class="chip-valor">—</span></li>
+          <li class="chip" data-clave="tts"><span class="chip-punto" aria-hidden="true"></span><span class="chip-nombre">TTS</span><span class="chip-valor">—</span></li>
+        </ul>
+      </section>
 
-      <p class="nota chat-nota" id="chat-nota">La sesión se guarda en <code>sesiones/</code>.</p>
-    </section>
+      <section class="tarjeta tarjeta-voz" aria-labelledby="t-voz">
+        <h2 id="t-voz">Voz activa</h2>
+        <dl class="datos">
+          <div><dt>Idioma</dt><dd id="dato-idioma">—</dd></div>
+          <div><dt>Voz</dt><dd id="dato-voz">—</dd></div>
+          <div><dt>Tono</dt><dd id="dato-tono">—</dd></div>
+        </dl>
+      </section>
 
-    <section class="tarjeta ancha" aria-labelledby="t-voz">
-      <h2 id="t-voz">Voz activa</h2>
-      <dl class="datos">
-        <div><dt>Idioma</dt><dd id="dato-idioma">—</dd></div>
-        <div><dt>Voz</dt><dd id="dato-voz">—</dd></div>
-        <div><dt>Tono</dt><dd id="dato-tono">—</dd></div>
-      </dl>
-    </section>
-
-    <section class="tarjeta ancha" aria-labelledby="t-ajustes">
-      <div class="ajustes-cabecera">
-        <h2 id="t-ajustes">Ajustes</h2>
-        <div class="chat-botones">
-          <button type="button" class="boton-mini" id="btn-probar"
-                  title="Oír la voz con los valores del formulario, sin guardar">
-            Probar voz
-          </button>
-          <button type="button" class="boton-mini peligro-mini" id="btn-restaurar"
-                  title="Volver a los valores de fábrica">
-            Restaurar
-          </button>
-          <button type="button" class="boton-mini primario-mini" id="btn-guardar"
-                  disabled>
-            Guardar
-          </button>
+      <section class="tarjeta tarjeta-ajustes" aria-labelledby="t-ajustes">
+        <div class="ajustes-cabecera">
+          <h2 id="t-ajustes">Ajustes</h2>
+          <div class="grupo-botones" role="group" aria-label="Acciones de los ajustes">
+            <button type="button" class="boton-mini" id="btn-probar"
+                    title="Oír la voz con los valores del formulario, sin guardar">
+              Probar voz
+            </button>
+            <button type="button" class="boton-mini peligro-mini" id="btn-restaurar"
+                    title="Volver a los valores de fábrica">
+              Restaurar
+            </button>
+            <button type="button" class="boton-mini primario-mini" id="btn-guardar"
+                    disabled>
+              Guardar
+            </button>
+          </div>
         </div>
-      </div>
 
-      <p class="ajustes-aviso" id="ajustes-aviso" hidden></p>
+        <p class="ajustes-aviso" id="ajustes-aviso" role="status" hidden></p>
 
-      <div class="ajustes-grupos" id="ajustes-grupos">
-        <p class="nota">Cargando ajustes…</p>
-      </div>
+        <div class="ajustes-grupos" id="ajustes-grupos">
+          <p class="nota">Cargando ajustes…</p>
+        </div>
 
-      <details class="ajustes-avanzados" id="ajustes-caja-avanzados" hidden>
-        <summary>Avanzados</summary>
-        <div class="ajustes-grupos" id="ajustes-avanzados"></div>
-      </details>
+        <details class="ajustes-avanzados" id="ajustes-caja-avanzados" hidden>
+          <summary>Avanzados</summary>
+          <div class="ajustes-grupos" id="ajustes-avanzados"></div>
+        </details>
 
-      <datalist id="lista-voces"></datalist>
-      <datalist id="lista-entrada"></datalist>
-      <datalist id="lista-salida"></datalist>
-      <datalist id="lista-modelos"></datalist>
-    </section>
+        <datalist id="lista-voces"></datalist>
+        <datalist id="lista-entrada"></datalist>
+        <datalist id="lista-salida"></datalist>
+        <datalist id="lista-modelos"></datalist>
+      </section>
+    </div>
+
+    <div class="columna columna-chat">
+      <section class="tarjeta chat" aria-labelledby="t-chat">
+        <div class="chat-cabecera">
+          <h2 id="t-chat">Conversación</h2>
+          <div class="grupo-botones" role="group" aria-label="Acciones de la conversación">
+            <button type="button" class="boton-mini" id="btn-copiar"
+                    title="Copiar la conversación como texto">Copiar</button>
+            <button type="button" class="boton-mini" id="btn-exportar"
+                    title="Descargar la sesión en Markdown">Exportar .md</button>
+            <button type="button" class="boton-mini peligro-mini" id="btn-limpiar"
+                    title="Empezar una sesión nueva">Limpiar</button>
+            <p class="oculto" id="copiar-estado" role="status"></p>
+          </div>
+        </div>
+
+        <div class="chat-registro" id="chat-registro" role="log" aria-live="polite"
+             aria-label="Conversación con Niu">
+          <p class="chat-vacio" id="chat-vacio">Inicia el motor y háblale, o escribe abajo.</p>
+        </div>
+
+        <form class="chat-form" id="chat-form">
+          <label class="oculto" for="chat-entrada">Mensaje para Niu</label>
+          <input class="chat-entrada" id="chat-entrada" name="mensaje" type="text"
+                 autocomplete="off" enterkeyhint="send"
+                 placeholder="Inicia el motor para escribir…" maxlength="2000" disabled>
+          <button type="submit" class="boton primario chat-enviar" id="btn-enviar" disabled>
+            Enviar
+          </button>
+        </form>
+
+        <p class="nota chat-nota" id="chat-nota">La sesión se guarda en <code>sesiones/</code>.</p>
+      </section>
+    </div>
   </main>
-
-  <p class="aviso" id="aviso" role="alert" hidden></p>
 
   <script src="/estaticos/app.js"></script>
 </body>
