@@ -295,17 +295,38 @@ está construido sobre su API. Un 3D en Blender exigiría VRM + VSeeFace/Warudo 
 VMC, es decir, otro proveedor de avatar entero, además de modelado y rigging 3D
 desde cero. El 3D queda como fase futura detrás de una interfaz de avatar.
 
-Ruta completa, contrato técnico con el código y checklist:
+Ruta completa, contrato de parámetros y checklist:
 [`PLAN_SKIN.md`](PLAN_SKIN.md).
 
 | Hito | Descripción | Estado |
 |------|-------------|--------|
-| Validar el pipeline | Modelo de ejemplo gratuito: mapeo de boca y hotkeys, sin dibujar nada | ⬜ |
+| Validar el pipeline | Modelo de ejemplo gratuito: mapeo de boca y hotkeys, sin dibujar nada | ✅ |
 | Aprender el rigging | Tutoriales oficiales con un personaje de práctica | ⬜ |
 | Arte final | PSD de Niu con las capas separadas para deformar | ⬜ |
-| Rigging Live2D | Mallas, deformadores, `ParamMouthOpenY`, ojos, `ParamBreath` y física | ⬜ |
+| Rigging Live2D | Los 23 parámetros del contrato: boca, ojos, cejas, ángulos, respiración y física | ⬜ |
 | Exportación | `.model3.json` + `.moc3` compatible con VTube Studio | ⬜ |
 | Hotkeys | `MouthSmile`, `MouthOpen`, `MouthFrown`, `MouthAngry` (nombres exactos) | ⬜ |
+
+El código de comportamiento queda **congelado hasta tener el modelo** (ver el
+apartado 9 de `PLAN_SKIN.md`): lo irreversible son las capas del PSD, y las
+ideas de expresión por etiqueta, turnos espontáneos y modo descanso se afinan
+mejor con Niu ya dibujada.
+
+---
+
+# 🎯 FASE 5.5: COMPORTAMIENTO SOCIAL (DESPUÉS DEL MODELO)
+
+Detalle de cada pieza en `PLAN_SKIN.md` (apartado 9) y en las decisiones
+pendientes de `PROJECT_CONTEXT.md`.
+
+| Hito | Descripción | Estado |
+|------|-------------|--------|
+| Etiqueta de emoción | El cerebro marca el tono (`[sonrisa] …`) y el motor lo quita antes del TTS; sustituye la búsqueda de palabras sueltas | ⬜ |
+| Ticks de silencio | `_escuchar()` ya devuelve `None` cada 8 s; contar esos `None` como reloj de inactividad | ⬜ |
+| Turnos espontáneos | Con silencio largo, Niu inicia: comentario o pregunta, con enfriamiento y probabilidad | ⬜ |
+| Interrupción | Si hablas mientras arranca un turno espontáneo, se cancela | ⬜ |
+| Modo descanso | Tras N segundos, solo responde si oye la palabra clave | ⬜ |
+| Detector de palabra clave | Interfaz `DetectorDePalabraClave`; hoy busca «niu» en la transcripción, mañana un modelo de wake word | ⬜ |
 
 ---
 

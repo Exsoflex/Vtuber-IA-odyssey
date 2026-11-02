@@ -1,7 +1,7 @@
 # 🎨 La skin de Niu — guía paso a paso
 
-Estado: **pendiente de hacer**. Este documento es la ruta que se decidió seguir
-y el contrato técnico entre el avatar y el código.
+Estado: **listo para empezar**. El código queda congelado hasta que exista el
+modelo; la razón está en el apartado 9.
 
 Decisión de la sesión: **Live2D 2D**, no 3D. El porqué está en el apartado 1;
 no es una preferencia estética, sale de lo que el programa ya sabe hacer.
@@ -59,6 +59,56 @@ Son dos cosas distintas y se confunden todo el rato:
 Que el modelo tenga `ParamMouthOpenY` **no** significa que exista el hotkey
 `MouthSmile`. Si Niu dice «el modelo no tiene el hotkey», revisa la pestaña
 **Hotkeys**, no la de parámetros.
+
+### Las expresiones no se dibujan (esto te ahorra una semana)
+
+Un `.exp3.json` no es un dibujo: es una **lista de valores de parámetros**.
+«Sonrisa» significa `ParamMouthForm = 1`, `ParamEyeLSmile = 1`,
+`ParamBrowLY = 0.5`. Nada más.
+
+Consecuencia práctica: **no hay que dibujar cuatro caras**. Se dibuja una cara,
+se riggea con los parámetros correctos y las expresiones se crean después, en
+Cubism o en VTS, en cinco minutos y tantas como quieras.
+
+Por eso el código pendiente (etiqueta de emoción, proactividad, modo descanso)
+**no puede obligarte a redibujar**: si un día Niu necesita ocho emociones en vez
+de cuatro, son cuatro expresiones más, no ocho dibujos más.
+
+Lo que sí es irreversible es **la separación en capas**. Una expresión solo
+puede mover lo que está en su propia capa: si las cejas viven dentro de la capa
+de la cara, ningún parámetro de ceja funcionará nunca sin volver a dibujar.
+
+### El contrato de parámetros (decide esto ANTES de dibujar)
+
+Regla para cada capa del PSD: **¿qué parámetro la va a mover?** Si no hay
+respuesta, probablemente no hace falta separarla. Si hay respuesta y la capa no
+existe, ese parámetro nunca funcionará.
+
+Estos 23 caben en el límite de 30 de Cubism FREE (que además incluye los de
+blend shape):
+
+| Parámetro | Qué mueve | Capa(s) que necesita | ¿Obligatorio? |
+|---|---|---|---|
+| `ParamMouthOpenY` | boca abierta/cerrada (lip sync) | interior, dientes y labios | **Sí** |
+| `ParamMouthForm` | sonrisa ↔ pena | labios | **Sí**, para emociones |
+| `ParamEyeLOpen` / `ParamEyeROpen` | párpado | párpado superior (+ blanco detrás) | **Sí** |
+| `ParamEyeLSmile` / `ParamEyeRSmile` | ojo sonriente | párpado y mejilla del ojo | Muy recomendado |
+| `ParamEyeBallX` / `ParamEyeBallY` | mirada | iris separado del blanco | Recomendado |
+| `ParamBrowLY` / `ParamBrowRY` | ceja arriba/abajo | **cejas en capa propia** | **Sí**, para emociones |
+| `ParamBrowLForm` / `ParamBrowRForm` | ceja inclinada (enfado/tristeza) | **cejas en capa propia** | **Sí**, para emociones |
+| `ParamCheek` | rubor | capa de rubor | Opcional |
+| `ParamAngleX` / `Y` / `Z` | cabeza | todo el modelo dentro de un deformador | **Sí** |
+| `ParamBodyAngleX` / `Y` / `Z` | cuerpo | cuerpo y ropa | Recomendado |
+| `ParamBreath` | respiración | pecho y hombros | **Sí** (si no, parece congelada) |
+| `ParamHairFront` / `Side` / `Back` | física del pelo | mechones separados | Recomendado |
+
+Suma: 23 parámetros. Quedan 7 de margen, y conviene no gastarlos: cada parámetro
+extra es una cosa más que animar y mantener.
+
+Nota sobre las cejas: son cuatro parámetros para algo que parece un detalle,
+pero **la emoción se lee en las cejas más que en la boca**. Una sonrisa con las
+cejas neutras parece una mueca. Si tienes que economizar en algún sitio, que no
+sea aquí.
 
 ### El mapeo de la boca (el paso que más se olvida)
 
@@ -120,8 +170,14 @@ invertir horas en un dibujo.
    ```
    Lista los hotkeys del modelo y dispara los cuatro que Niu necesita, sin
    tener que hablarle.
-8. Arranca Niu y dile algo que contenga «feliz» o «triste». La cara del modelo
-   de ejemplo debe cambiar.
+8. Arranca Niu y provoca una respuesta que contenga «feliz», «alegre»,
+   «triste» o «enojo». Ojo con esto: **el motor mira lo que dice Niu, no lo que
+   dices tú**. Si le pides «haz una cara feliz» y ella contesta «¡claro!», no se
+   dispara nada, porque la palabra no está en su respuesta. Es una limitación
+   conocida y está en la lista de cosas para después del modelo (apartado 9):
+   la solución es que el cerebro marque la emoción en el texto.
+
+   La cara del modelo de ejemplo debe cambiar cuando acierte.
 
 **Qué decides al final:** si los pasos 5 y 8 funcionan, el 100 % del código de
 avatar está validado. Puedes dibujar con confianza.
@@ -131,9 +187,14 @@ avatar está validado. Puedes dibujar con confianza.
 **Objetivo:** no aprender a hacer *la skin de Niu*, sino a hacer *un modelo
 Live2D*. Sale más barato practicar con el arte de los tutoriales.
 
-Haz el tutorial oficial «Live2D by diagrams» y el de la boca A-I-U-E-O, que
-son cortos y están en español y otros idiomas. Después el tutorial básico de
-6 partes.
+Orden concreto: «Live2D by Diagrams» → «1. Illustration Processing» (este es el
+que te enseña a separar capas) → boca A-I-U-E-O → parpadeo → el básico de seis
+partes.
+
+El sitio oficial está en japonés, inglés, chino y coreano; **no hay versión en
+español**. Si el inglés te cuesta, los vídeos se entienden bien porque casi todo
+es la interfaz, y las cifras de los menús se repiten. Para las partes con más
+texto, el navegador traduce la página razonablemente.
 
 Lo que te llevas de esta fase **no es el modelo**: es saber cómo tiene que
 estar dividido el PSD para poder deformarlo. Ese conocimiento decide cómo
@@ -150,13 +211,18 @@ Reglas para el PSD (esto es lo que la fase 1 te enseñó):
   mechón que se mueva es una capa.
 - Los ojos: iris, esclera, párpado superior, párpado inferior y cejas
   separados.
-- La boca: Labio superior, Labio inferior, Interior de la boca y dientes
+- La boca: labio superior, labio inferior, interior de la boca y dientes
   separados. La boca es la parte que más se nota si está mal.
 - Deja el pelo de la cara y el cuerpo en capas aparte de la ropa.
 - Resolución y color: no uses color plano en las zonas que se van a
   transparentear; usa degradados suaves.
 - **Aplica los tutoriales de física (hair physics) y de draw order** para que
   el pelo caiga de forma natural.
+
+Y la pregunta que decide cada capa, del contrato de parámetros: **¿qué parámetro
+la va a mover?** Si la respuesta es «ninguno», no hace falta separarla. Si la
+respuesta existe pero la capa no, ese parámetro nunca funcionará y habría que
+volver a dibujar.
 
 ### Fase 3 — Rigging en Cubism ⏱️ 1-2 semanas (con práctica)
 
@@ -167,17 +233,22 @@ Lo mínimo para que Niu funcione:
 | Qué | Cómo |
 |---|---|
 | Malla y deformadores | Malla automática en las capas; deformadores de rotación y warp donde toque |
-| Parámetro de boca | `ParamMouthOpenY` (0..1) en la malla de la boca, con al menos la forma de cerrada y la de abierta. El tutorial A-I-U-E-O es justo esto |
-| Parámetros de ojos | `ParamEyeLOpen`, `ParamEyeROpen` (0..1) para que VTS parpadee solo |
-| Angle X / Angle Y | `ParamAngleX`, `ParamAngleY` para que VTS la incline con la cara |
+| **Los 23 parámetros del contrato** | Los de la tabla del apartado 2. Los `Sí` son obligatorios; el resto, según tiempo |
+| Boca | `ParamMouthOpenY` (0..1) con malla deformable y al menos la forma cerrada y la abierta. El tutorial A-I-U-E-O es justo esto |
+| Ojos | `ParamEyeLOpen` / `ParamEyeROpen` (0..1) para que VTS parpadee solo |
+| Cabeza | `ParamAngleX` / `Y` / `Z` para que se incline con tu cara |
 | Respiración | `ParamBreath` (0..1) para que no se vea congelada al callar |
-| Expresiones | Crea archivos `.exp3.json`: sonrisa, sorpresa, tristeza, enfado |
+| Expresiones | `.exp3.json`: son valores de parámetros guardados, no arte nuevo. Con los parámetros ya riggeados, cada una son dos minutos. Empieza por sonrisa, sorpresa, tristeza y enfado (los cuatro nombres que pide el motor) |
 | Física | Física de pelo y ropa (tutorial oficial de física) |
 
 Sobre la boca: el lip sync de Niu manda **40 valores por segundo** en un rango
 0..1 continuo. Si la boca solo tiene dos imágenes (abierta/cerrada) que se
 intercambian, se verá a saltos. La forma correcta es una malla que se deforma:
 el tutorial de A-I-U-E-O existe precisamente para eso.
+
+Sobre el orden dentro de la fase: **primero la malla y los parámetros
+obligatorios**, y en cuanto la boca y los ojos respondan, exporta y prueba en
+VTS. No esperes a tener el modelo perfecto para comprobar que VTS lo carga.
 
 ### Fase 4 — Exportar y conectar ⏱️ 1 tarde
 
@@ -189,12 +260,18 @@ el tutorial de A-I-U-E-O existe precisamente para eso.
 3. Copia **toda** la carpeta a `StreamingAssets/Live2DModels/` de VTube Studio.
 4. Carga el modelo en VTS y configura:
    - El mapeo de boca del apartado 2.
-   - Los cuatro hotkeys con los nombres exactos.
-5. Verifica:
+   - Los cuatro hotkeys con los nombres exactos del apartado 2.
+5. Verifica, en este orden:
    ```powershell
    .venv\Scripts\python.exe probar_lipsync.py
+   .venv\Scripts\python.exe probar_expresiones.py
    ```
    y luego una conversación en el panel, buscando que la expresión cambie.
+
+Si el modelo exportado trae los `.exp3.json`, en VTS solo hay que **crear el
+hotkey** que los lanza; la expresión ya está. Si no los trae, se pueden crear
+desde VTS con los parámetros del modelo, que es más lento pero no requiere
+volver a Cubism.
 
 ---
 
@@ -203,20 +280,37 @@ el tutorial de A-I-U-E-O existe precisamente para eso.
 ### En el PSD
 
 - [ ] Pelo dividido en capas (delante, medio, detrás, mechones sueltos)
+- [ ] **Cejas en capa propia** (sin esto no hay emociones)
 - [ ] Ojos: esclera, iris, párpado superior, párpado inferior, cejas
 - [ ] Boca: labio superior, labio inferior, interior, dientes
 - [ ] Sin colores planos en zonas que se van a transparentear
-- [ ] Resolución de textura suficiente para el tamaño final
+- [ ] Resolución de textura suficiente para el tamaño final (máx. 2048 px en FREE)
 
 ### En Cubism
 
+Obligatorios:
+
 - [ ] `ParamMouthOpenY` (0..1) con malla deformable, no dos imágenes
+- [ ] `ParamMouthForm`
 - [ ] `ParamEyeLOpen` / `ParamEyeROpen` (0..1)
-- [ ] `ParamAngleX` / `ParamAngleY`
+- [ ] `ParamBrowLY` / `ParamBrowRY` / `ParamBrowLForm` / `ParamBrowRForm`
+- [ ] `ParamAngleX` / `ParamAngleY` / `ParamAngleZ`
 - [ ] `ParamBreath`
-- [ ] 4 expresiones exportadas (sonrisa, sorpresa, tristeza, enfado)
-- [ ] Física de pelo configurada
 - [ ] Exportado como `.moc3` + `.model3.json`
+
+Recomendados:
+
+- [ ] `ParamEyeLSmile` / `ParamEyeRSmile`
+- [ ] `ParamEyeBallX` / `ParamEyeBallY`
+- [ ] `ParamBodyAngleX` / `ParamBodyAngleY` / `ParamBodyAngleZ`
+- [ ] `ParamHairFront` / `ParamHairSide` / `ParamHairBack` + física
+- [ ] `ParamCheek`
+- [ ] Total por debajo de 30 parámetros (el límite de FREE)
+
+Expresiones:
+
+- [ ] 4 exportadas: sonrisa, sorpresa, tristeza, enfado
+- [ ] (Opcional) más adelante: pensativa, aburrida. Solo requieren parámetros ya riggeados
 
 ### En VTube Studio
 
@@ -246,11 +340,15 @@ Comprobados en la
 |---|---|---|
 | Texturas por modelo | 1 (hasta 2048 px) | Sin límite |
 | ArtMesh | 100 | Sin límite |
-| Parámetros de movimiento | 30 | Sin límite |
-| Parámetros de blend shape | 3 | Sin límite |
-| Deformadores | 50 | Sin límite |
+| Parámetros de movimiento | **30, incluidos los de blend shape** | Sin límite |
+| Parámetros de blend shape | 3 (dentro de los 30) | Sin límite |
+| Deformadores | 50 (warp + rotación juntos) | Sin límite |
 | Partes (carpetas) | 30 | Sin límite |
 | Divisiones de warp deformer | 9 × 9 | 100 × 100 |
+
+Atención al detalle que se escapa: **el límite de 30 incluye los parámetros de
+blend shape**, así que no son 30 + 3. El contrato de este documento usa 23
+parámetros y deja 7 de margen.
 
 Un personaje de estilo anime normal cabe de sobra: 1 textura de 2048, menos de
 100 capas, menos de 30 parámetros. Si te quedas corto, PRO tiene **prueba de
@@ -264,33 +362,64 @@ cubierto. Si algún día Niu generase ingresos, eso ya es otra pregunta.
 
 ## 6. Recursos oficiales
 
-Todos verificados y actualizados a enero de 2026.
+Comprobados el 1 de noviembre de 2026: **los 24 enlaces de este documento
+responden** (esta lista y los que aparecen en los apartados 2 y 5).
 
-### Tutoriales (este es el orden que funciona)
+### Tutoriales, en el orden que sirve
 
-1. [Live2D by diagrams](https://docs.live2d.com/en/cubism-editor-tutorials/figure/)
-   — el más rápido para entender el qué de cada cosa. Hay PSD de práctica.
-2. [Parpadeo en 10 minutos](https://docs.live2d.com/en/cubism-editor-tutorials/eye-blink/)
-3. [Boca A-I-U-E-O en 20 minutos](https://docs.live2d.com/en/cubism-editor-tutorials/mouth-aiueo/)
-   — el más importante para Niu: es exactamente lo que necesita la boca.
-4. [Tutorial básico, 6 partes](https://docs.live2d.com/en/cubism-editor-tutorials/top/)
-   — ilustración → importar → expresiones → movimiento del cuerpo → XY →
-   animaciones.
-5. [Física](https://docs.live2d.com/en/cubism-editor-tutorials/physical-calculation-settings/)
-   y [exportar para uso embebido](https://docs.live2d.com/en/cubism-editor-tutorials/exporting-data-for-embedding/)
-6. [Vídeo de creación del modelo de muestra Jin Natori](https://docs.live2d.com/en/cubism-editor-tutorials/natori_making/)
-   — el proceso completo de principio a fin, muy útil como referencia.
+**Antes de dibujar nada (los dos que deciden cómo dibujas):**
 
-### Referencias
+1. [Live2D by Diagrams](https://docs.live2d.com/en/cubism-editor-tutorials/figure/)
+   — el más rápido para entender qué es un parámetro y qué es un deformador.
+   Hay PSD de práctica.
+2. [1. Illustration Processing](https://docs.live2d.com/en/cubism-editor-tutorials/psd/)
+   — **el más importante de todos para ti**: cómo hay que separar el PSD para
+   que se pueda deformar. Esto es lo que te dice qué capas dibujar antes de
+   empezar, y es lo único que no tiene arreglo barato si se hace mal.
 
-- [Manual del Cubism Editor](https://docs.live2d.com/en/cubism-editor-manual/top/)
-  — para cuando una función concreta no esté en los tutoriales.
-- [Modelos de muestra gratuitos](https://www.live2d.com/en/learn/sample/)
-- [API de VTube Studio](https://github.com/DenchiSoft/VTubeStudio) — el README
-  oficial. Los nombres de los mensajes (`HotkeyTriggerRequest`,
-  `HotkeysInCurrentModelRequest`, `ParameterCreationRequest`…) salen de ahí.
-- [Live2D JUKU](https://juku.live2dcs.jp/en/) — cursos oficiales en vídeo
-  (principalmente en japonés).
+**Las dos técnicas que Niu usa de verdad:**
+
+3. [Parpadeo en 10 minutos](https://docs.live2d.com/en/cubism-editor-tutorials/eye-blink/)
+4. [Boca A-I-U-E-O en 20 minutos](https://docs.live2d.com/en/cubism-editor-tutorials/mouth-aiueo/)
+   — el lip sync de Niu es exactamente esto.
+
+**El tutorial básico, seis partes (hazlo con un personaje de práctica):**
+
+5. [2. Preparing to Move the Illustration](https://docs.live2d.com/en/cubism-editor-tutorials/import/)
+6. [3. Adding Facial Expressions](https://docs.live2d.com/en/cubism-editor-tutorials/expression/)
+7. [4. Adding Body Movement](https://docs.live2d.com/en/cubism-editor-tutorials/deformer/)
+8. [5. Adding XY Facial Movement](https://docs.live2d.com/en/cubism-editor-tutorials/xy/)
+9. [6. Creating Animations](https://docs.live2d.com/en/cubism-editor-tutorials/animator/)
+
+**Atajo opcional:** [Easy Modeling with Template
+Function](https://docs.live2d.com/en/cubism-editor-tutorials/template/) trae
+plantillas con los parámetros estándar ya creados. Puede ahorrarte el trabajo
+mecánico de crear los 23 a mano — vale la pena mirarlo antes de crearlos uno
+por uno.
+
+**Física, movimiento y exportación:**
+
+10. [1. Model Preparation](https://docs.live2d.com/en/cubism-editor-tutorials/preparing-the-model/)
+11. [2. Physics Settings](https://docs.live2d.com/en/cubism-editor-tutorials/physical-calculation-settings/)
+12. [3. Preparation for Motion and Facial Expressions](https://docs.live2d.com/en/cubism-editor-tutorials/prepare-motions-and-expressions/)
+13. [4. Exporting Data for Embedded Use](https://docs.live2d.com/en/cubism-editor-tutorials/exporting-data-for-embedding/)
+    — el que necesitas para que VTS cargue el modelo.
+14. [Blend mode y offscreen drawing](https://docs.live2d.com/en/cubism-editor-tutorials/blendmode-offscreendrawing/)
+    — para que el sombreado y el rubor se vean bien encima de la piel.
+
+**Referencia y ejemplo completo:**
+
+15. [Vídeo de creación del modelo de muestra Jin Natori](https://docs.live2d.com/en/cubism-editor-tutorials/natori_making/)
+    — el proceso completo de principio a fin. Es el mejor «así se ve cuando ya
+    sabes» que vas a encontrar.
+16. [Manual del Cubism Editor](https://docs.live2d.com/en/cubism-editor-manual/top/)
+    — para cuando una función concreta no esté en los tutoriales.
+17. [Modelos de muestra gratuitos](https://www.live2d.com/en/learn/sample/)
+18. [API de VTube Studio](https://github.com/DenchiSoft/VTubeStudio) — el README
+    oficial. Los nombres de los mensajes (`HotkeyTriggerRequest`,
+    `HotkeysInCurrentModelRequest`, `ParameterCreationRequest`…) salen de ahí.
+19. [Live2D JUKU](https://juku.live2dcs.jp/en/) — cursos oficiales en vídeo
+    (principalmente en japonés).
 
 ---
 
@@ -329,9 +458,32 @@ expresiones seguidas, se encolan (la cola admite 32).
 
 ## 8. Lo que este documento cubre y lo que no
 
-Cubre: la ruta, el contrato con el código, la checklist y dónde está cada
-tutorial oficial.
+Cubre: la ruta, el contrato de parámetros y de hotkeys, la checklist y dónde
+está cada tutorial oficial.
 
 No cubre: el arte en sí (eso es tuyo), ni la explicación pausada de cada
 función de Cubism (para eso está el manual oficial), ni un 3D futuro (que
 requeriría rehacer la capa de avatar).
+
+---
+
+## 9. Por qué el modelo va antes que el resto del código
+
+Hay tres ideas pendientes para Niu: que la expresión no dependa de una palabra
+suelta (etiqueta de emoción), que sea proactiva cuando hay silencio, y que entre
+en modo descanso hasta oír «Oye Niu». Ninguna de las tres se hace antes del
+modelo, y la razón no es de gusto:
+
+| | Código pendiente | Modelo |
+|---|---|---|
+| ¿Depende del otro? | No | Solo necesita la lista de parámetros, y está en el apartado 2 |
+| ¿Se puede afinar sin el otro? | **No**: un bucle que habla sola y un cambio de prompt se juzgan de oído | Sí, es trabajo manual |
+| ¿Qué rompe si se hace en mal orden? | Nada | **Capas mal separadas = volver a dibujar** |
+
+Las expresiones no son arte: son valores de parámetros guardados. Por eso el
+código puede esperar sin coste — como mucho pedirá más expresiones, y eso se
+crea en minutos. Pero una ceja metida en la capa de la cara **no tiene arreglo
+barato**.
+
+Así que el reparto es: **ahora, el modelo; después, el comportamiento**. Y la
+proactividad se calibra al final, mirando a Niu con cara.

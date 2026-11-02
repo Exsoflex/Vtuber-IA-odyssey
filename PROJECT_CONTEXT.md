@@ -138,8 +138,17 @@ respuesta completa.
 ### El avatar todavía no existe
 
 Niu no tiene modelo propio: se controla con el que haya cargado en VTube Studio.
-La ruta para construirlo (decidir 2D sobre 3D, contrato técnico con el código,
-checklist y tutoriales) está en [`PLAN_SKIN.md`](PLAN_SKIN.md).
+La ruta para construirlo (decidir 2D sobre 3D, contrato de parámetros, checklist
+y tutoriales) está en [`PLAN_SKIN.md`](PLAN_SKIN.md).
+
+Estado de esa ruta: **fase 0 validada**. Con Hiyori cargado en VTS se comprobó
+que Niu mueve la boca por su cuenta y que dispara hotkeys por nombre; lo único
+que faltaba era que el modelo tuviera hotkeys llamados como el motor espera.
+
+El orden decidido es **modelo primero, código después**, y la razón está en el
+apartado 9 de `PLAN_SKIN.md`: un `.exp3.json` es una lista de valores de
+parámetros, no arte, así que el código pendiente no puede obligar a redibujar.
+Lo que no tiene arreglo barato es separar mal las capas del PSD.
 
 ---
 
@@ -205,6 +214,11 @@ La primera implementación debe conservar el comportamiento actual tanto como se
 | Hecho | El perfil activo manda sobre `config.json` | Una sola fuente de verdad para el panel; `config.json` queda como copia viva que leen la CLI y los módulos que no conocen perfiles |
 | Hecho | Instrucción del sistema leída en cada turno | Editarla debe aplicarse sin reiniciar el motor, como el resto de ajustes calientes |
 | Hecho | `<dialog>` propio en vez de `prompt()`/`confirm()` | El navegador integrado de la aplicación no soporta los diálogos nativos: el CRUD de perfiles fallaba sin avisar |
+| Hecho | Live2D 2D para la skin, no 3D | VTube Studio solo carga Live2D y la capa de avatar ya está construida sobre su API; el 3D exigiría VRM + VSeeFace/Warudo + VMC, otro proveedor entero |
+| Hecho | El modelo antes que el código pendiente | Las expresiones son valores de parámetros (baratas de añadir), pero la separación en capas del PSD no tiene arreglo barato; y la proactividad se afina de oído con la cara ya hecha |
+| Pendiente | Etiqueta de emoción en el prompt | Hoy la expresión depende de que aparezca una palabra suelta en la respuesta de Niu, así que es una lotería |
+| Pendiente | Turnos espontáneos tras silencio | Niu debe poder iniciar la conversación, no solo responder |
+| Pendiente | Modo descanso con palabra clave | Escuchar sin contestar a todo; activarse con «Oye Niu» |
 | Pendiente | `GeminiAdapter` | Poder alternar entre local y nube |
 
 ---
@@ -638,6 +652,7 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Un nombre es un dato, no una convención**: por eso `TriggerHotkeyRequest`/`HotkeyTriggerRequest` merece un test que compruebe la cadena exacta. Lo que se envía por el cable es lo que hay que verificar.
 - **Comprobar por adelantado evita el trabajo perdido**: los hotkeys que Niu pide son un contrato con el avatar. Pedirlos al modelo cargado y avisar de los que faltan convierte un problema invisible en una lista de tareas.
 - **El orden de las comprobaciones de texto es semántica**: `>:(` contiene `:(`, así que la tristeza se comía el enfado. En cuanto se comparan subcadenas, el orden pasa a formar parte del comportamiento y hay que dejarlo escrito.
+- **Un test que depende del entorno no es un test**: uno de los que comprobaban el disparo de hotkeys ponía `connected = False` y esperaba un `False`. Pero `peticion()` se reconecta sola, así que en una máquina con VTube Studio abierto el test se conectaba de verdad, disparaba el hotkey y fallaba. Pasaba o no según si VTS estaba encendido. Un doble tiene que cubrir el camino entero, no solo la bandera que parece controlarlo.
 - **Parámetro no es hotkey**: un parámetro (`ParamMouthOpenY`) es un valor 0..1 que deforma el dibujo y sí se puede mapear; un hotkey es una acción de VTube Studio que se dispara por nombre. Tener el parámetro no implica tener el hotkey, y el aviso de «hotkey no encontrado» se refiere siempre al segundo. Cuando dos conceptos se llaman parecido, el mensaje de error debe nombrar el que es.
 - **El idioma no es solo traducir**: el registro vive en el prompt. Pedir «responde en inglés» a un prompt lleno de muletillas españolas produce inglés traducido, no inglés natural. La solución es darle al perfil sus propias muletillas, no traducir las existentes.
 - **Los servicios externos rellenan el audio**: Edge-TTS añade ~0,85 s de silencio al final de cada frase. En un audio entero es invisible; al trocearlo, cada trozo arrastra su relleno y el silencio se convierte en pausa. Hay que medir los bordes, no solo la duración.

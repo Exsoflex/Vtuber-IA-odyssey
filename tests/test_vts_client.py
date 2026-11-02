@@ -38,6 +38,13 @@ class WebSocketFalso:
         pass
 
 
+class WebSocketRoto(WebSocketFalso):
+    """WebSocket cuyo envío falla, como un cable desconectado a media petición."""
+
+    async def send(self, texto: str) -> None:
+        raise ConnectionError("VTS cerró la conexión")
+
+
 def cliente_con(respuestas: list[dict]) -> tuple[VTSClient, WebSocketFalso]:
     """Devuelve un cliente ya conectado, con su WebSocket falso."""
     c = VTSClient()
@@ -91,11 +98,17 @@ async def test_un_hotkey_inexistente_devuelve_false_y_no_revienta():
     assert ok is False
 
 
-async def test_sin_conexion_no_dispara_nada():
-    """Sin WebSocket no se puede ni intentar."""
+async def test_si_el_envio_falla_devuelve_false():
+    """Un cable roto a media petición es un fallo controlado, no una caída.
+
+    Este test NO pone `connected = False`: `peticion()` se reconecta sola cuando
+    ve ese estado, así que apagar la bandera solo haría que el test intentara
+    hablar con el VTube Studio real de la máquina. Con `connected = True` y un
+    WebSocket que falla al enviar se prueba el camino sin tocar la red.
+    """
     cliente = VTSClient()
-    cliente.connected = False
-    cliente.websocket = None
+    cliente.websocket = WebSocketRoto([])
+    cliente.connected = True
 
     ok = await cliente.trigger_expression("MouthSmile")
 
