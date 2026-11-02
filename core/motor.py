@@ -303,9 +303,10 @@ class MotorNiu:
         if faltan:
             self._emitir(
                 "sistema",
-                mensaje=f"El modelo cargado no tiene estos hotkeys: "
-                        f"{', '.join(faltan)}. Niu no podrá cambiar de "
-                        f"expresión con ellos.",
+                mensaje=f"El modelo no tiene los hotkeys de expresión: "
+                        f"{', '.join(faltan)}. Un hotkey no es un parámetro: "
+                        f"se crea en VTube Studio → pestaña Hotkeys, con "
+                        f"esos nombres exactos.",
             )
 
     async def _abrir_oido(self) -> None:
@@ -621,8 +622,8 @@ class MotorNiu:
             self._emitir(
                 "sistema",
                 mensaje=f"El modelo no tiene el hotkey «{expresion}». "
-                        f"Créalo en VTube Studio con ese nombre exacto "
-                        f"(o renómbralo en el motor).",
+                        f"Un hotkey no es un parámetro: se crea en VTube "
+                        f"Studio → pestaña Hotkeys, con ese nombre exacto.",
             )
 
     def _expresion_para(self, respuesta: str) -> str | None:

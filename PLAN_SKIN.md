@@ -44,6 +44,22 @@ qué**.
 | Avisa de lo que falta | `core/motor.py` (`_comprobar_hotkeys`) | Los hotkeys deben llamarse así, con mayúsculas y minúsculas como están |
 | VTS renderiza el modelo | VTube Studio | **Cubism 3 o superior**: `.model3.json` + `.moc3` |
 
+### Parámetro no es hotkey (el error que más veces se comete)
+
+Son dos cosas distintas y se confunden todo el rato:
+
+| | Parámetro | Hotkey |
+|---|---|---|
+| Qué es | Un valor continuo 0..1 que deforma el dibujo | Una **acción** guardada en VTS |
+| Ejemplos | `ParamMouthOpenY`, `ParamMouthForm`, `ParamEyeLOpen` | «Sonreír», «Lanzar animación» |
+| Dónde se ve | Lista de parámetros del modelo | Pestaña **Hotkeys** de VTS |
+| Quién lo mueve | El tracking, o un plugin por mapeo | Niu lo **dispara por nombre** |
+| Lo que crea Niu | `NiuMouthOpen` (mapeado a `ParamMouthOpenY`) | Nada: usa los que ya existan |
+
+Que el modelo tenga `ParamMouthOpenY` **no** significa que exista el hotkey
+`MouthSmile`. Si Niu dice «el modelo no tiene el hotkey», revisa la pestaña
+**Hotkeys**, no la de parámetros.
+
 ### El mapeo de la boca (el paso que más se olvida)
 
 El lip sync de Niu **no** usa el micrófono de VTS. Niu calcula la apertura de
@@ -95,11 +111,19 @@ invertir horas en un dibujo.
 6. Crea en VTS cuatro hotkeys de tipo «Toggle Expression» (o «Trigger
    Animation») con los nombres exactos `MouthSmile`, `MouthOpen`,
    `MouthFrown`, `MouthAngry`, cada uno apuntando a una expresión del modelo de
-   ejemplo.
-7. Arranca Niu y dile algo que contenga «feliz» o «triste». La cara del modelo
+   ejemplo. Si el modelo de ejemplo no trae expresiones (Hiyori, por ejemplo,
+   no trae ninguna), renombra dos de sus hotkeys de animación a `MouthSmile` y
+   `MouthOpen`: sirve igual para comprobar que el pipeline funciona.
+7. Comprueba los hotkeys con el script de diagnóstico:
+   ```powershell
+   .venv\Scripts\python.exe probar_expresiones.py
+   ```
+   Lista los hotkeys del modelo y dispara los cuatro que Niu necesita, sin
+   tener que hablarle.
+8. Arranca Niu y dile algo que contenga «feliz» o «triste». La cara del modelo
    de ejemplo debe cambiar.
 
-**Qué decides al final:** si los pasos 5 y 7 funcionan, el 100 % del código de
+**Qué decides al final:** si los pasos 5 y 8 funcionan, el 100 % del código de
 avatar está validado. Puedes dibujar con confianza.
 
 ### Fase 1 — Aprender el rigging con un personaje de práctica ⏱️ 2-4 tardes
@@ -203,6 +227,7 @@ el tutorial de A-I-U-E-O existe precisamente para eso.
 - [ ] Hotkey `MouthFrown` → expresión de tristeza
 - [ ] Hotkey `MouthAngry` → expresión de enfado
 - [ ] `probar_lipsync.py` dice «✅ La boca se abre y se cierra»
+- [ ] `probar_expresiones.py` dice «✅ Los cuatro hotkeys existen y se disparan»
 - [ ] En una conversación, la expresión cambia
 
 ### En Niu
@@ -280,9 +305,10 @@ Estás usando el respaldo `VoiceVolumePlusMouthOpen`, que VTS alimenta con su
 micrófono. Mapea `NiuMouthOpen` a propósito.
 
 **Niu habla pero la cara no cambia.**
-Falta el hotkey o no se llama exactamente igual. Al arrancar, Niu avisa en el
-chat de qué hotkeys no encuentra: fíjate en ese aviso, que dice los nombres
-exactos que faltan.
+Falta el hotkey o no se llama exactamente igual. Ojo: que el modelo tenga el
+parámetro `ParamMouthOpenY` no significa que tenga el hotkey `MouthSmile`.
+Corre `probar_expresiones.py`: lista los hotkeys que hay de verdad y prueba
+los cuatro que Niu necesita.
 
 **VTS no responde al mover la boca.**
 VTube Studio responde en su siguiente frame de render, no al recibir. Es lo
