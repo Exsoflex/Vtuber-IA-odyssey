@@ -289,25 +289,33 @@ class MotorNiu:
         queda con la cara neutra sin decir por qué.
 
         Comprobarlo al arrancar convierte un fallo invisible en una lista de
-        tareas concreta.
+        tareas concreta. El aviso dice también qué hotkeys **sí** tiene el
+        modelo, porque «no existe» se entiende mucho mejor al lado de «lo que
+        hay es esto».
         """
         try:
             hotkeys = await self._listar_hotkeys()
         except Exception:
             return
-        if not hotkeys:
-            return
+        if hotkeys is None:
+            return      # sin modelo cargado: no se puede saber, y no es un fallo
 
         nombres = {str(h.get("name", "")).strip().lower() for h in hotkeys}
         faltan = [e for e in EXPRESIONES_NIU if e.lower() not in nombres]
-        if faltan:
-            self._emitir(
-                "sistema",
-                mensaje=f"El modelo no tiene los hotkeys de expresión: "
-                        f"{', '.join(faltan)}. Un hotkey no es un parámetro: "
-                        f"se crea en VTube Studio → pestaña Hotkeys, con "
-                        f"esos nombres exactos.",
-            )
+        if not faltan:
+            return
+
+        tienen = [str(h.get("name", "")) for h in hotkeys]
+        detalle = (f"El modelo tiene: {', '.join(tienen)}."
+                   if tienen else "El modelo no tiene ningún hotkey.")
+
+        self._emitir(
+            "sistema",
+            mensaje=f"El modelo no tiene los hotkeys de expresión: "
+                    f"{', '.join(faltan)}. {detalle} Un hotkey no es un "
+                    f"parámetro: es una acción que se crea en VTube Studio → "
+                    f"pestaña Hotkeys, con esos nombres exactos.",
+        )
 
     async def _abrir_oido(self) -> None:
         """Localiza micrófono y STT. Si no hay, decide entre texto y parar."""

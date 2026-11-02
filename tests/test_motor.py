@@ -61,7 +61,7 @@ class MotorDePrueba(MotorNiu):
         self.brain = CerebroFalso()
         self.hablado: list[str] = []
         self.vts_conectado = False
-        self.hotkeys: list[dict] = []
+        self.hotkeys: list[dict] | None = None
         self.hotkeys_disparados: list[str] = []
         self.hotkey_falla = False
 
@@ -467,11 +467,13 @@ async def test_al_arrancar_avisa_de_los_hotkeys_que_faltan():
     avisos = [d["mensaje"] for t, d in eventos
               if t == "sistema" and "hotkeys" in d["mensaje"]]
     assert len(avisos) == 1
-    # El que sí tiene no se avisa; los otros tres, sí.
-    assert "MouthOpen" in avisos[0]
-    assert "MouthFrown" in avisos[0]
-    assert "MouthAngry" in avisos[0]
-    assert "MouthSmile" not in avisos[0]
+    # Los que faltan son los tres; el que sí tiene aparece como «lo que hay».
+    faltan = avisos[0].split(". ")[0]
+    assert "MouthOpen" in faltan
+    assert "MouthFrown" in faltan
+    assert "MouthAngry" in faltan
+    assert "MouthSmile" not in faltan
+    assert "El modelo tiene: MouthSmile" in avisos[0]
 
 
 async def test_si_el_modelo_tiene_todos_los_hotkeys_no_avisa():
@@ -479,6 +481,34 @@ async def test_si_el_modelo_tiene_todos_los_hotkeys_no_avisa():
     motor.hotkeys = [{"name": n, "type": "ToggleExpression"}
                      for n in ("MouthSmile", "MouthOpen",
                                "MouthFrown", "MouthAngry")]
+    eventos = recolectar(motor)
+
+    await motor.iniciar()
+    await motor.detener()
+
+    assert not any("hotkeys" in d["mensaje"]
+                   for t, d in eventos if t == "sistema")
+
+
+async def test_un_modelo_sin_ningun_hotkey_tambien_se_avisa():
+    """Lista vacía es un dato, no un «no se pudo comprobar»: hay que avisar."""
+    motor = MotorDePrueba()
+    motor.hotkeys = []
+    eventos = recolectar(motor)
+
+    await motor.iniciar()
+    await motor.detener()
+
+    avisos = [d["mensaje"] for t, d in eventos
+              if t == "sistema" and "hotkeys" in d["mensaje"]]
+    assert len(avisos) == 1
+    assert "ningún hotkey" in avisos[0]
+
+
+async def test_sin_modelo_cargado_no_se_avisa_de_nada():
+    """`None` es «no hay modelo», y eso no es un fallo del modelo."""
+    motor = MotorDePrueba()
+    motor.hotkeys = None
     eventos = recolectar(motor)
 
     await motor.iniciar()

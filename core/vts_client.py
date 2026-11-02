@@ -307,22 +307,31 @@ class VTSClient:
             return False
         return respuesta.get("messageType") == "HotkeyTriggerResponse"
 
-    async def listar_hotkeys(self) -> list[dict]:
+    async def listar_hotkeys(self) -> list[dict] | None:
         """Devuelve los hotkeys del modelo cargado en VTube Studio.
 
         Sirve para saber qué nombres se pueden usar: si un hotkey no está en
         esta lista, dispararlo devuelve un error aunque el mensaje se envíe
         bien.
 
+        La diferencia entre `[]` y `None` importa: una lista vacía significa
+        «hay modelo y no tiene ningún hotkey» (un problema real que conviene
+        avisar), mientras que `None` significa «no se pudo preguntar», que no
+        es culpa del modelo.
+
         Returns:
-            Lista de dicts con `name`, `type`, `file` y `hotkeyID`. Vacía si no
-            hay ningún modelo cargado.
+            Lista de dicts con `name`, `type`, `file` y `hotkeyID`; lista vacía
+            si el modelo no tiene hotkeys; `None` si VTS no respondió o no hay
+            modelo cargado.
         """
         respuesta = await self.peticion("HotkeysInCurrentModelRequest")
         if not respuesta or respuesta.get("messageType") != \
                 "HotkeysInCurrentModelResponse":
-            return []
-        return list(respuesta.get("data", {}).get("availableHotkeys", []))
+            return None
+        datos = respuesta.get("data", {})
+        if not datos.get("modelLoaded"):
+            return None
+        return list(datos.get("availableHotkeys", []))
 
 
 vts_client = VTSClient()

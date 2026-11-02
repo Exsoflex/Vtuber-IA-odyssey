@@ -28,14 +28,19 @@ from core.vts_client import vts_client
 sys.stdout.reconfigure(encoding="utf-8")
 
 
-async def listar() -> list[dict]:
+async def listar() -> list[dict] | None:
     """Muestra los hotkeys del modelo y los devuelve."""
     hotkeys = await vts_client.listar_hotkeys()
+    if hotkeys is None:
+        print("\n[1/2] No hay ningún modelo cargado en VTube Studio.")
+        print("      Carga un modelo antes de probar los hotkeys.")
+        return None
+
     print(f"\n[1/2] Hotkeys del modelo cargado: {len(hotkeys)}")
     if not hotkeys:
-        print("      ⚠️ No hay ningún hotkey. Se crean en VTube Studio →")
-        print("         pestaña Hotkeys (una expresión o una animación con")
-        print("         el nombre exacto que pide Niu).")
+        print("      ⚠️ El modelo no tiene ningún hotkey. Se crean en")
+        print("         VTube Studio → pestaña Hotkeys (una expresión o una")
+        print("         animación con el nombre exacto que pide Niu).")
         return hotkeys
 
     for h in hotkeys:
@@ -83,6 +88,8 @@ async def main() -> None:
 
     try:
         hotkeys = await listar()
+        if hotkeys is None:
+            return
         await comprobar(hotkeys)
     finally:
         await vts_client.close()

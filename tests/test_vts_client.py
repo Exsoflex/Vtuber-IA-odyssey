@@ -123,10 +123,21 @@ async def test_lista_los_hotkeys_del_modelo_cargado():
     assert [h["name"] for h in hotkeys] == ["MouthSmile", "MouthOpen"]
 
 
-async def test_sin_modelo_cargado_la_lista_vacia():
+async def test_sin_modelo_cargado_no_se_puede_saber():
+    """`None` es «no se pudo preguntar», y no es lo mismo que «no hay hotkeys»."""
     cliente, _ = cliente_con([
         {"messageType": "HotkeysInCurrentModelResponse",
          "data": {"modelLoaded": False, "availableHotkeys": []}},
+    ])
+
+    assert await cliente.listar_hotkeys() is None
+
+
+async def test_un_modelo_sin_hotkeys_devuelve_lista_vacia():
+    """Un modelo cargado que no tiene ningún hotkey es una lista vacía."""
+    cliente, _ = cliente_con([
+        {"messageType": "HotkeysInCurrentModelResponse",
+         "data": {"modelLoaded": True, "availableHotkeys": []}},
     ])
 
     assert await cliente.listar_hotkeys() == []
@@ -137,4 +148,4 @@ async def test_una_respuesta_inesperada_no_rompe_la_lista():
         {"messageType": "APIError", "data": {"message": "no model loaded"}},
     ])
 
-    assert await cliente.listar_hotkeys() == []
+    assert await cliente.listar_hotkeys() is None
