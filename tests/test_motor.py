@@ -61,6 +61,9 @@ class MotorDePrueba(MotorNiu):
         self.brain = CerebroFalso()
         self.hablado: list[str] = []
         self.vts_conectado = False
+        self.hotkeys: list[dict] = []
+        self.hotkeys_disparados: list[str] = []
+        self.hotkey_falla = False
 
     def _crear_brain(self) -> CerebroFalso:
         return self.brain
@@ -76,6 +79,13 @@ class MotorDePrueba(MotorNiu):
 
     async def _cerrar_vts(self) -> None:
         self.vts_conectado = False
+
+    async def _listar_hotkeys(self) -> list[dict]:
+        return self.hotkeys
+
+    async def _disparar_hotkey(self, nombre: str) -> bool:
+        self.hotkeys_disparados.append(nombre)
+        return not self.hotkey_falla
 
     async def _hablar(self, texto: str, tiempos: dict[str, float],
                       turno: int = 0) -> None:
@@ -417,3 +427,76 @@ def test_desuscribir_deja_de_recibir():
     motor._emitir("sistema", mensaje="dos")
 
     assert recibidos == ["sistema"]
+
+
+# ─── Expresiones y hotkeys ─────────────────────────────────────────────
+
+
+async def test_el_tono_de_la_respuesta_elige_el_hotkey():
+    """Cada emoción pide su hotkey por su nombre exacto."""
+    casos = [
+        ("¡Qué bien, estoy feliz!", "MouthSmile"),
+        ("¡Vaya, qué sorpresa!", "MouthOpen"),
+        ("Me siento triste :(", "MouthFrown"),
+        ("¡Me da mucho enojo! >:(", "MouthAngry"),
+    ]
+
+    for respuesta, esperado in casos:
+        motor = MotorDePrueba()
+        await motor._expresar(respuesta)
+        assert motor.hotkeys_disparados == [esperado], respuesta
+
+
+async def test_una_respuesta_neutra_no_pide_expresion():
+    motor = MotorDePrueba()
+
+    await motor._expresar("La temperatura de hoy es de 22 grados.")
+
+    assert motor.hotkeys_disparados == []
+
+
+async def test_al_arrancar_avisa_de_los_hotkeys_que_faltan():
+    """El hotkey es un contrato: si falta, hay que decirlo, no fallar en silencio."""
+    motor = MotorDePrueba()
+    motor.hotkeys = [{"name": "MouthSmile", "type": "ToggleExpression"}]
+    eventos = recolectar(motor)
+
+    await motor.iniciar()
+    await motor.detener()
+
+    avisos = [d["mensaje"] for t, d in eventos
+              if t == "sistema" and "hotkeys" in d["mensaje"]]
+    assert len(avisos) == 1
+    # El que sí tiene no se avisa; los otros tres, sí.
+    assert "MouthOpen" in avisos[0]
+    assert "MouthFrown" in avisos[0]
+    assert "MouthAngry" in avisos[0]
+    assert "MouthSmile" not in avisos[0]
+
+
+async def test_si_el_modelo_tiene_todos_los_hotkeys_no_avisa():
+    motor = MotorDePrueba()
+    motor.hotkeys = [{"name": n, "type": "ToggleExpression"}
+                     for n in ("MouthSmile", "MouthOpen",
+                               "MouthFrown", "MouthAngry")]
+    eventos = recolectar(motor)
+
+    await motor.iniciar()
+    await motor.detener()
+
+    assert not any("hotkeys" in d["mensaje"]
+                   for t, d in eventos if t == "sistema")
+
+
+async def test_un_hotkey_que_falla_se_avisa_una_sola_vez():
+    """Un aviso por hotkey: si no, el chat se llena de lo mismo."""
+    motor = MotorDePrueba()
+    motor.hotkey_falla = True
+    eventos = recolectar(motor)
+
+    await motor._expresar("estoy feliz")
+    await motor._expresar("qué bien, alegre")
+
+    avisos = [d["mensaje"] for t, d in eventos
+              if t == "sistema" and "MouthSmile" in d["mensaje"]]
+    assert len(avisos) == 1

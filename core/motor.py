@@ -97,6 +97,14 @@ ESCUCHANDO = "escuchando"
 PENSANDO = "pensando"
 HABLANDO = "hablando"
 
+# Hotkeys que el motor puede pedir. Son los nombres que el modelo debe tener
+# en VTube Studio para que Niu pueda cambiar de expresión.
+#
+# Son un contrato entre el avatar y el código: si en el modelo el hotkey se
+# llama de otra forma, VTS responde con un error y la expresión no cambia. Por
+# eso el motor avisa de los que falten en vez de fallar en silencio.
+EXPRESIONES_NIU = ("MouthSmile", "MouthOpen", "MouthFrown", "MouthAngry")
+
 Oyente = Callable[[str, dict], None]
 
 
@@ -150,6 +158,8 @@ class MotorNiu:
         self._stt = None
         self._mic: int | None = None
         self._nombre_mic = ""
+        # Hotkeys que ya se han avisado: el aviso se da una vez, no cada turno.
+        self._expresiones_avisadas: set[str] = set()
 
     # ─── Observación ───────────────────────────────────────────────────
 
@@ -265,8 +275,38 @@ class MotorNiu:
             self._emitir("sistema", mensaje=f"VTS no disponible "
                                             f"({type(e).__name__}: {e}). "
                                             f"Sigo sin avatar.")
+        else:
+            await self._comprobar_hotkeys()
 
         await self._abrir_oido()
+
+    async def _comprobar_hotkeys(self) -> None:
+        """Avisa de los hotkeys de expresión que el modelo no tiene.
+
+        Los hotkeys son un contrato entre el motor y el avatar: el motor pide
+        `MouthSmile`, `MouthOpen`, `MouthFrown` y `MouthAngry` por su nombre.
+        Si el modelo se llama de otra forma, VTS devuelve un error y Niu se
+        queda con la cara neutra sin decir por qué.
+
+        Comprobarlo al arrancar convierte un fallo invisible en una lista de
+        tareas concreta.
+        """
+        try:
+            hotkeys = await self._listar_hotkeys()
+        except Exception:
+            return
+        if not hotkeys:
+            return
+
+        nombres = {str(h.get("name", "")).strip().lower() for h in hotkeys}
+        faltan = [e for e in EXPRESIONES_NIU if e.lower() not in nombres]
+        if faltan:
+            self._emitir(
+                "sistema",
+                mensaje=f"El modelo cargado no tiene estos hotkeys: "
+                        f"{', '.join(faltan)}. Niu no podrá cambiar de "
+                        f"expresión con ellos.",
+            )
 
     async def _abrir_oido(self) -> None:
         """Localiza micrófono y STT. Si no hay, decide entre texto y parar."""
@@ -560,24 +600,52 @@ class MotorNiu:
 
         Es cosmético: si VTS no está conectado, se avisa y se sigue. La
         conversación no depende de que el avatar sonría.
+
+        Los hotkeys son un contrato con el modelo: si el avatar no los tiene,
+        VTS responde con un error. Aquí se avisa una sola vez por hotkey, para
+        que el problema se vea sin llenar el chat de avisos.
         """
-        respuesta_lower = respuesta.lower()
-        if any(p in respuesta_lower for p in ["feliz", "alegre", "contenta", ":)", ":-)"]):
-            expresion = "MouthSmile"
-        elif any(p in respuesta_lower for p in ["sorpresa", "sorprendida", "wow", "‼️"]):
-            expresion = "MouthOpen"
-        elif any(p in respuesta_lower for p in ["triste", "tristeza", "llorar", ":("]):
-            expresion = "MouthFrown"
-        elif any(p in respuesta_lower for p in ["enojada", "enojo", "enojado", ">:("]):
-            expresion = "MouthAngry"
-        else:
+        expresion = self._expresion_para(respuesta)
+        if expresion is None:
             return
 
         try:
-            await vts_client.trigger_expression(expresion)
+            ok = await self._disparar_hotkey(expresion)
         except Exception as e:
             self._emitir("sistema", mensaje=f"No se pudo cambiar la expresión "
                                             f"({type(e).__name__}).")
+            return
+
+        if not ok and expresion not in self._expresiones_avisadas:
+            self._expresiones_avisadas.add(expresion)
+            self._emitir(
+                "sistema",
+                mensaje=f"El modelo no tiene el hotkey «{expresion}». "
+                        f"Créalo en VTube Studio con ese nombre exacto "
+                        f"(o renómbralo en el motor).",
+            )
+
+    def _expresion_para(self, respuesta: str) -> str | None:
+        """Elige el hotkey de expresión según el tono de lo que dice Niu.
+
+        El orden importa: el emoticon de enfado `>:(` contiene al de tristeza
+        `:(` como subcadena. Si se comprobara la tristeza primero, el enfado
+        nunca llegaría a su rama.
+
+        Returns:
+            El nombre del hotkey, o None si la respuesta no sugiere ninguna
+            expresión.
+        """
+        respuesta_lower = respuesta.lower()
+        if any(p in respuesta_lower for p in ["feliz", "alegre", "contenta", ":)", ":-)"]):
+            return "MouthSmile"
+        if any(p in respuesta_lower for p in ["sorpresa", "sorprendida", "wow", "‼️"]):
+            return "MouthOpen"
+        if any(p in respuesta_lower for p in ["enojada", "enojo", "enojado", ">:("]):
+            return "MouthAngry"
+        if any(p in respuesta_lower for p in ["triste", "tristeza", "llorar", ":("]):
+            return "MouthFrown"
+        return None
 
     # ─── Puntos que los tests sustituyen ───────────────────────────────
 
@@ -589,6 +657,14 @@ class MotorNiu:
 
     def _buscar_mic(self, nombre: str) -> int | None:
         return buscar_dispositivo(nombre, salida=False)
+
+    async def _listar_hotkeys(self) -> list[dict]:
+        """Hotkeys del modelo cargado. Los tests sustituyen este punto."""
+        return await vts_client.listar_hotkeys()
+
+    async def _disparar_hotkey(self, nombre: str) -> bool:
+        """Dispara un hotkey. Los tests sustituyen este punto."""
+        return await vts_client.trigger_expression(nombre)
 
     async def _conectar_vts(self) -> None:
         await vts_client.connect_and_auth()

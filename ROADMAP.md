@@ -287,15 +287,25 @@ imposibles de explicar.
 
 ---
 
-# 🎯 FASE 5: MODELO 3D PROPIO
+# 🎯 FASE 5: MODELO PROPIO — LIVE2D 2D
 
-| Hito | Descripción |
-|------|-------------|
-| Diseño de capas | Cara, ojos, boca, cabello, cuerpo y accesorios |
-| Rigging Live2D | Mallas, deformadores y física |
-| Parámetros estándar | MouthOpen, EyeOpen, AngleX/Y, BodyAngleX, ParamBreath |
-| Exportación | Modelo compatible con VTube Studio |
-| Hotkeys | Happy, Sad, Surprised, Angry, Thinking |
+Decisión: **Live2D 2D**, no 3D. No es una preferencia estética: VTube Studio solo
+entiende Live2D, y todo el control de avatar (boca, expresiones, WebSocket) ya
+está construido sobre su API. Un 3D en Blender exigiría VRM + VSeeFace/Warudo +
+VMC, es decir, otro proveedor de avatar entero, además de modelado y rigging 3D
+desde cero. El 3D queda como fase futura detrás de una interfaz de avatar.
+
+Ruta completa, contrato técnico con el código y checklist:
+[`PLAN_SKIN.md`](PLAN_SKIN.md).
+
+| Hito | Descripción | Estado |
+|------|-------------|--------|
+| Validar el pipeline | Modelo de ejemplo gratuito: mapeo de boca y hotkeys, sin dibujar nada | ⬜ |
+| Aprender el rigging | Tutoriales oficiales con un personaje de práctica | ⬜ |
+| Arte final | PSD de Niu con las capas separadas para deformar | ⬜ |
+| Rigging Live2D | Mallas, deformadores, `ParamMouthOpenY`, ojos, `ParamBreath` y física | ⬜ |
+| Exportación | `.model3.json` + `.moc3` compatible con VTube Studio | ⬜ |
+| Hotkeys | `MouthSmile`, `MouthOpen`, `MouthFrown`, `MouthAngry` (nombres exactos) | ⬜ |
 
 ---
 

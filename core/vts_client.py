@@ -286,19 +286,43 @@ class VTSClient:
         """Alias de `inyectar_parametro` con peso obligatorio."""
         return await self.inyectar_parametro(parameter_name, value, peso=weight)
 
-    async def trigger_expression(self, expression_file: str):
+    async def trigger_expression(self, expression_file: str) -> bool:
         """Dispara un hotkey del modelo por su nombre o por su ID.
 
         `expression_file` es un nombre de hotkey de VTS, no un archivo: los
         nombres válidos son los que aparecen en la lista de hotkeys del modelo.
+        VTS acepta el nombre sin distinguir mayúsculas, o el ID único.
+
+        Returns:
+            True si VTS confirmó la ejecución (`HotkeyTriggerResponse`).
+            False si no hay modelo, el hotkey no existe o hubo un error de red.
         """
-        respuesta = await self.peticion("TriggerHotkeyRequest",
+        respuesta = await self.peticion("HotkeyTriggerRequest",
                                         {"hotkeyID": expression_file})
         if not respuesta:
-            return
+            return False
         if respuesta.get("messageType") == "APIError":
             print(f"[WARN] [VTS] Hotkey {expression_file!r}: "
                   f"{respuesta.get('data', {}).get('message')}")
+            return False
+        return respuesta.get("messageType") == "HotkeyTriggerResponse"
+
+    async def listar_hotkeys(self) -> list[dict]:
+        """Devuelve los hotkeys del modelo cargado en VTube Studio.
+
+        Sirve para saber qué nombres se pueden usar: si un hotkey no está en
+        esta lista, dispararlo devuelve un error aunque el mensaje se envíe
+        bien.
+
+        Returns:
+            Lista de dicts con `name`, `type`, `file` y `hotkeyID`. Vacía si no
+            hay ningún modelo cargado.
+        """
+        respuesta = await self.peticion("HotkeysInCurrentModelRequest")
+        if not respuesta or respuesta.get("messageType") != \
+                "HotkeysInCurrentModelResponse":
+            return []
+        return list(respuesta.get("data", {}).get("availableHotkeys", []))
 
 
 vts_client = VTSClient()

@@ -125,13 +125,20 @@ respuesta completa.
 - ✅ Tope de tiempo en Edge-TTS (15 s, 2 intentos, `NIU_TTS_TIMEOUT` / `NIU_TTS_INTENTOS`): un servicio que deja de contestar ya no cuelga la conversación.
 - ✅ **Perfiles de configuración** (`core/perfiles.py` + `panel/perfiles.py`): cada perfil guarda una copia completa de los ajustes y su propia instrucción de sistema. Se puede crear (de fábrica o duplicando el activo), renombrar, activar y eliminar; el perfil activo se aplica sobre `config.json` al arrancar y al activarlo, y guardar ajustes en el panel los copia también al perfil. El cambio de perfil avisa si hay campos fríos pendientes de reinicio. Se guarda en `perfiles.json` con escritura atómica (no hay base de datos: son pocos perfiles de un solo usuario).
 - ✅ **Personalidad editable** (`core/personalidad.py`): la instrucción de fábrica vive fuera del cerebro y cada perfil puede sustituirla desde el panel. `NiuBrain` la lee en **cada turno**, así que editarla se aplica en la respuesta siguiente sin reiniciar el motor. El texto es deliberadamente hablado: frases cortas, muletillas variadas, dudas y cambios de opinión triviales, sin tono de asistente ni referencias constantes al espacio.
-- ✅ 207 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, cancelación de la grabación (`test_stt_cancelar.py`), ajustes (`test_config.py`), motor (`test_motor.py`, incluida la entrada de texto), historial del chat (`test_chat.py`), formulario de ajustes (`test_ajustes_panel.py`), perfiles (`test_perfiles.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
+- ✅ **Expresiones por hotkey arregladas** (`core/vts_client.py`): el mensaje se llamaba `TriggerHotkeyRequest` y la API de VTube Studio espera `HotkeyTriggerRequest`. VTS respondía `APIError` y el código solo lo imprimía como warning, así que las expresiones **nunca se ejecutaron** y no había ningún síntoma visible. Ahora `trigger_expression()` devuelve un booleano, el motor avisa en el chat cuando el hotkey falla y, al arrancar, `_comprobar_hotkeys()` lista los hotkeys que el modelo no tiene (`MouthSmile`, `MouthOpen`, `MouthFrown`, `MouthAngry`).
+- ✅ **Orden de las expresiones corregido**: el emoticon de enfado `>:(` contiene al de tristeza `:(` como subcadena, así que la comprobación de tristeza se llevaba el caso antes de llegar a enfado. Ahora enfado se comprueba antes que tristeza.
+- ✅ 219 tests en `tests/` (`pytest` + `pytest-asyncio`): corte de frases, recorte de silencio, idiomas, envolvente del lip sync, tope de tiempo del TTS, cancelación de la grabación (`test_stt_cancelar.py`), ajustes (`test_config.py`), motor (`test_motor.py`, incluida la entrada de texto y las expresiones), cliente de VTS (`test_vts_client.py`), historial del chat (`test_chat.py`), formulario de ajustes (`test_ajustes_panel.py`), perfiles (`test_perfiles.py`) y panel (`test_panel.py`, con `TestClient` en memoria).
 - ✅ Transcripción verificada de extremo a extremo (3/3 frases correctas con el DGM20).
 - ✅ Fallback a teclado cuando no hay micrófono.
-- ⚠️ Las expresiones por keyword usan nombres de hotkey que deben coincidir con los del modelo.
 - ⚠️ El soporte de imágenes quedó desactivado: el modelo local no es multimodal.
 - ⚠️ Gemini ya no está conectado; falta un `GeminiAdapter` si se quiere volver a usar.
 - ⚠️ El logging sigue siendo `print`.
+
+### El avatar todavía no existe
+
+Niu no tiene modelo propio: se controla con el que haya cargado en VTube Studio.
+La ruta para construirlo (decidir 2D sobre 3D, contrato técnico con el código,
+checklist y tutoriales) está en [`PLAN_SKIN.md`](PLAN_SKIN.md).
 
 ---
 
@@ -331,6 +338,35 @@ Resultado medido: `298/298` frames en 7,45 s para 7,46 s de audio, con `ParamMou
 | 23,3 ms | 31,2 ms | +7,9 ms |
 
 Con ese error, el bucle se quedaba un 4–5 % atrás y la boca terminaba la frase con retraso creciente, aunque el reloj fuera absoluto. Se arregla con `timeBeginPeriod(1)` mientras dura la animación (`_TemporizadorPreciso`), que baja el error a ~1 ms, y restando 2 ms de margen para que no se acumule. Después del arreglo, 20, 25, 30, 35 y 40 Hz cumplen con un 0,1 % de error.
+
+### Caso resuelto: «las expresiones nunca cambian» → era el nombre del mensaje
+
+Síntoma: Niu hablaba, la boca se movía, pero la cara del avatar se quedaba
+siempre en la misma expresión. Sin más rastro que un warning en la consola.
+
+Causa: el cliente enviaba `TriggerHotkeyRequest`. La API de VTube Studio
+espera `HotkeyTriggerRequest` (verificado en el README oficial de DenchiSoft).
+Con el nombre equivocado, VTS recibía el mensaje, lo rechazaba con un
+`APIError` y el código lo imprimía como warning y seguía. El fallo era
+**invisible**: no había excepción, no había ningún estado que cambiara, y como
+la conversación funciona igual sin avatar, nada indicaba que algo estuviera
+mal.
+
+| antes | después |
+|---|---|
+| `TriggerHotkeyRequest` | `HotkeyTriggerRequest` |
+| `trigger_expression()` no devolvía nada | devuelve `bool` (True si VTS confirmó) |
+| el error solo se imprimía | el motor avisa en el chat, una vez por hotkey |
+| nunca se comprobaban los hotkeys | al arrancar se listan los que faltan |
+
+Además se encontró un segundo bug mientras se escribía el test: el emoticon de
+enfado `>:(` **contiene** al de tristeza `:(` como subcadena, así que la
+comprobación de tristeza se llevaba el caso antes de llegar a enfado. Ahora
+enfado se comprueba antes.
+
+Lección: un fallo que solo se manifiesta como «algo no cambia» no se
+encuentra mirando el síntoma, sino el contrato. El nombre del mensaje es un
+dato exacto, no una convención, y por eso merece un test que lo compruebe.
 
 ### Caso resuelto: «se mueve la boca pero no se oye nada»
 
@@ -550,6 +586,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Distinguir «el servicio no puede» de «el cliente lo usa mal» (el caso de la inyección de parámetros).
 - Medir un bucle de tiempo real y ajustar la tasa a lo que el sistema sostiene de verdad.
 - Escribir tests para funciones puras (`tests/test_envolvente.py`) y para la tubería asíncrona.
+- Decidir entre 2D y 3D a partir de lo que la arquitectura ya soporta, no de la moda.
+- Usar la API oficial como fuente de verdad para los nombres exactos de los mensajes.
 
 ### Prioridad de aprendizaje actual
 
@@ -559,6 +597,7 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 4. Escribir tests para la lógica crítica (VAD, remuestreo, cerebro).
 5. Ganar autonomía depurando audio y concurrencia sin depender del tutor.
 6. Saber explicar cuándo una solución acoplada (VTS escuchando el bus) es peor que una explícita (Niu calculando su boca) aunque cueste una hora más.
+7. Rigging en Live2D: mallas, deformadores, parámetros estándar y física.
 
 ### Conceptos aprendidos dentro del proyecto
 
@@ -594,6 +633,10 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - **Todo servicio externo necesita un tope de tiempo**: Edge-TTS dejó de contestar sin cerrar la conexión y el sistema esperó más de 5 minutos. Sin `timeout` no hay error que capturar, solo un cuelgue silencioso. Y tras un fallo hay que crear un objeto nuevo si el anterior se consumió.
 - **Un test puede simular lo que no se puede provocar**: esperar a que un servicio se caiga justo ahora es imposible, pero sustituir su clase por un doble que se cuelga prueba el comportamiento igual, en milisegundos.
 - **Configuración o abstracción: no todo lo que varía necesita una interfaz**: los proveedores LLM necesitan un `Protocol` porque su *comportamiento* difiere; los idiomas son el mismo código con otros datos y se resuelven con una tabla de perfiles. La pregunta que decide es «¿cambia lo que hace, o solo los valores con los que lo hace?».
+- **Un fallo invisible suele ser un contrato mal escrito**: el nombre del mensaje de la API (`HotkeyTriggerRequest`) estaba invertido. Nada fallaba: VTS contestaba un error, el código lo silenciaba y la conversación seguía sin avatar. Cuando el síntoma es «algo no cambia», hay que leer el contrato, no el síntoma.
+- **Un nombre es un dato, no una convención**: por eso `TriggerHotkeyRequest`/`HotkeyTriggerRequest` merece un test que compruebe la cadena exacta. Lo que se envía por el cable es lo que hay que verificar.
+- **Comprobar por adelantado evita el trabajo perdido**: los hotkeys que Niu pide son un contrato con el avatar. Pedirlos al modelo cargado y avisar de los que faltan convierte un problema invisible en una lista de tareas.
+- **El orden de las comprobaciones de texto es semántica**: `>:(` contiene `:(`, así que la tristeza se comía el enfado. En cuanto se comparan subcadenas, el orden pasa a formar parte del comportamiento y hay que dejarlo escrito.
 - **El idioma no es solo traducir**: el registro vive en el prompt. Pedir «responde en inglés» a un prompt lleno de muletillas españolas produce inglés traducido, no inglés natural. La solución es darle al perfil sus propias muletillas, no traducir las existentes.
 - **Los servicios externos rellenan el audio**: Edge-TTS añade ~0,85 s de silencio al final de cada frase. En un audio entero es invisible; al trocearlo, cada trozo arrastra su relleno y el silencio se convierte en pausa. Hay que medir los bordes, no solo la duración.
 - **Política y mecanismo separados**: `extraer_frases` corta (mecanismo); cuándo *conviene* cortar (mínimo de caracteres, primera frase exenta) es política y la aplican los generadores. Así el mecanismo se puede probar con y sin política.
