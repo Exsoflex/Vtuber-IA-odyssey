@@ -13,4 +13,6 @@ __pycache__/
 *.pyc
 *.mp3
 *.wav
+# Documentos que genera la herramienta de PDF/Word: son artefactos, no fuentes.
+generated_documents/
 vts_token.txt

@@ -54,6 +54,7 @@ Vtuber IA odyssey/
 ├── probar_entrada_voz.py  # Prueba de extremo a extremo del oído (captura + STT)
 ├── probar_lipsync.py      # Prueba de extremo a extremo de la boca
 ├── probar_expresiones.py  # Diagnóstico: hotkeys del modelo y los 4 que pide Niu
+├── diagnostico/           # Histórico: scripts que encontraron el fallo del micrófono
 ├── tests/                 # pytest: lógica que puede romperse en silencio
 ├── requirements.txt
 ├── .env                   # GOOGLE_API_KEY, OLLAMA_MODEL, NIU_STT (no versionado)
@@ -61,8 +62,7 @@ Vtuber IA odyssey/
 ├── perfiles.json          # Perfiles: ajustes + instrucción de cada uno (no versionado)
 ├── sesiones/              # Chat guardado por el panel: un JSON por arranque (no versionado)
 ├── vts_token.txt          # Token VTS persistente (no versionado)
-├── test_audio.py          # Script auxiliar para listar salidas de audio
-└── dia_por_dia/           # Historial de aprendizaje
+└── dia_por_dia/           # Historial de aprendizaje: los scripts del curso
 ```
 
 ### Flujo funcional actual
@@ -677,7 +677,7 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 ## 🚧 Deuda técnica conocida
 
 - Falta `GeminiAdapter` para volver a usar la nube.
-- Los scripts sueltos de la raíz (`probar_entrada_voz.py`, `prueba_de_voz.py`, `diagnostico_mic.py`, `dia_por_dia/*`) siguen leyendo `os.getenv` directamente: no se migraron porque son herramientas de diagnóstico, no el motor.
+- Los scripts de prueba (`probar_entrada_voz.py`, `diagnostico/*`, `dia_por_dia/*`) siguen leyendo `os.getenv` directamente: no se migraron porque son herramientas de diagnóstico, no el motor.
 - Varias variables se leen al construir un objeto (modelo de Whisper, `keep_alive`) y no pueden cambiar en caliente: por eso el plan del panel las marca como «se aplica al reiniciar el motor».
 - Logging profesional pendiente.
 - Cuando Edge-TTS (servicio en la nube) falla para todas las frases, el turno acaba sin audio. El motor ya avisa en el chat («⚠️ Esta respuesta no tiene audio...»), pero no reintenta el turno entero.
@@ -694,7 +694,8 @@ Esta sección existe para que el tutor no enseñe desde cero conceptos que el es
 - Sin wake word: mientras el bucle está activo, Niu transcribe cualquier voz.
 - El primer arranque descarga el modelo de Whisper (~3 GB) si no está en caché.
 - `ParamMouthForm` se queda fijo en 1.0 (sonrisa): el mapeo `MouthSmile` existe pero nada le envía datos.
-- Las expresiones llaman a hotkeys que no existen en el modelo (`MouthSmile`, `MouthFrown`...): fallan sin avisar y no hay alternativa definida.
+- Los nombres de los hotkeys están fijos en el código (`EXPRESIONES_NIU`) y el modelo tiene que adaptarse a ellos. El motor ya avisa de los que faltan al arrancar y de los que fallan al dispararse, pero no negocia nombres ni tiene un plan B.
+- La expresión se elige por palabras sueltas en la respuesta de Niu, no por lo que ella quiere expresar: si su frase no contiene «feliz», «triste», «wow»… no hay expresión aunque se la pidas. Es la primera tarea de la FASE 5.5 (etiqueta en el prompt).
 
 ---
 
